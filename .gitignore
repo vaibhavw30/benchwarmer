@@ -1,0 +1,18 @@
+# Environment variables (IMPORTANT: Never commit .env with real credentials!)
+.env
+.env.local
+.env.production
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log

@@ -1,0 +1,35 @@
+# NBA Holistic Predictor - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core ML/Data Science
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+
+# Database
+supabase>=2.0.0
+python-dotenv>=1.0.0
+
+# Data Fetching
+requests>=2.31.0
+nba_api>=1.1.11  # Official NBA API wrapper
+beautifulsoup4>=4.12.0  # If scraping is needed
+
+# Visualization (for model analysis)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Model Serving (for API - optional, add later)
+# fastapi>=0.100.0
+# uvicorn>=0.23.0
+# pydantic>=2.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Utilities
+joblib>=1.3.0
+scipy>=1.11.0
+tqdm>=4.66.0  # Progress bars for data processing

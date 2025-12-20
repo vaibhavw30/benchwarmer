@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Model files (can be large, store in cloud instead)
+models/*.pkl
+models/*.joblib
+*.pkl
+*.joblib
+
+# Data files
+data/
+*.csv
+*.parquet
+
+# Visualizations
+visualizations/
+*.png
+*.jpg
+
+# Environment variables (CRITICAL: Never commit these!)
+.env
+.env.local
+.env.*.local
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
