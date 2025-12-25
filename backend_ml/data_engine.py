@@ -1,136 +1,166 @@
-# backend_ml/data_engine.py
-
 import pandas as pd
 import numpy as np
 import time
 from nba_api.stats.endpoints import leaguegamelog
 from supabase import create_client
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load Environment Variables from BOTH root .env and local .env.local
-from pathlib import Path
-root_dir = Path(__file__).resolve().parent.parent
-backend_dir = Path(__file__).resolve().parent
-
-# Load root .env first (for SUPABASE_URL)
-load_dotenv(dotenv_path=root_dir / '.env')
-# Then load local .env.local (for SUPABASE_SERVICE_KEY) - this overrides if conflicts
-load_dotenv(dotenv_path=backend_dir / '.env.local', override=True)
+# Load from both .env files
+load_dotenv()  # Load root .env
+load_dotenv(Path(__file__).parent / '.env.local', override=True)  # Load local secrets
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # From .env.local
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+
+TEAM_ALTITUDES = {
+    1610612743: 5280, # Denver
+    1610612762: 4226, # Utah
+    1610612756: 1117, # Phoenix
+    1610612760: 1200, # OKC
+}
 
 def initialize_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    if SUPABASE_URL and SUPABASE_KEY:
+        return create_client(SUPABASE_URL, SUPABASE_KEY)
+    return None
 
-# ============================================================================
-# 1. FETCH RAW DATA
-# ============================================================================
-
-def fetch_season_data(season='2023-24'):
-    """
-    Fetches raw game logs (Points, Assists, etc) for a whole season.
-    """
-    print(f"🏀 Fetching raw data for {season}...")
+def fetch_season_data(season):
+    print(f"🏀 Fetching {season}...")
     try:
-        # Request regular season data
-        log = leaguegamelog.LeagueGameLog(
-            season=season, 
-            season_type_all_star='Regular Season'
-        ).get_data_frames()[0]
+        log = leaguegamelog.LeagueGameLog(season=season, season_type_all_star='Regular Season').get_data_frames()[0]
+        time.sleep(1)
         return log
     except Exception as e:
-        print(f"Error fetching season {season}: {e}")
+        print(f"Error fetching {season}: {e}")
         return pd.DataFrame()
 
-# ============================================================================
-# 2. FEATURE ENGINEERING (The "Holistic" Logic)
-# ============================================================================
+def fetch_all_history():
+    seasons = [
+        '2015-16', '2016-17', '2017-18', '2018-19', '2019-20',
+        '2020-21', '2021-22', '2022-23', '2023-24'
+    ]
+    frames = []
+    for s in seasons:
+        frames.append(fetch_season_data(s))
+    return pd.concat(frames, ignore_index=True)
 
-def calculate_advanced_features(df):
+def calculate_four_factors(df):
     """
-    Turns raw scores into predictive 'Rolling Averages'.
-    Logic: We want to know a team's form *entering* the game.
+    Calculates the 'Four Factors' + Possession Count.
     """
-    print("⚙️ Calculating rolling stats (Holistic Data)...")
+    # 1. Possessions (Standard Formula)
+    df['POSS'] = df['FGA'] + 0.44*df['FTA'] - df['OREB'] + df['TOV']
     
-    # Sort by date so "previous game" logic works
+    # 2. Effective Field Goal % (Shooting Efficiency)
+    df['EFG_PCT'] = (df['FGM'] + 0.5 * df['FG3M']) / df['FGA']
+    
+    # 3. Turnover % (Ball Security)
+    df['TOV_PCT'] = df['TOV'] / (df['FGA'] + 0.44*df['FTA'] + df['TOV'])
+    
+    # 4. Free Throw Rate (Aggression)
+    df['FT_RATE'] = df['FTA'] / df['FGA']
+    
+    # 5. Offensive Rating (Points Efficiency)
+    df['OFF_RATING'] = (df['PTS'] / df['POSS']) * 100
+    
+    # Win Indicator for Scaling
+    df['WIN'] = df['WL'].map({'W': 1, 'L': 0})
+    
+    return df
+
+def calculate_rolling_features(df):
+    print("🔄 Calculating Four Factors EWMA...")
+    
     df['GAME_DATE'] = pd.to_datetime(df['GAME_DATE'])
     df = df.sort_values('GAME_DATE')
     
-    # Define what stats define "Team Strength"
-    features_to_roll = ['PTS', 'FG_PCT', 'AST', 'REB', 'PLUS_MINUS']
+    # We roll the Four Factors components. 
+    # Note: We roll OREB and DREB raw numbers so we can calc percentages dynamically later.
+    features_to_roll = ['EFG_PCT', 'TOV_PCT', 'FT_RATE', 'OFF_RATING', 'OREB', 'DREB'] 
     
-    # Calculate Last 5 Games Average (shift(1) ensures we don't include TONIGHT'S stats in the prediction)
+    # 1. EWMA (Recent Form)
     df_rolled = df.groupby('TEAM_ID')[features_to_roll].transform(
-        lambda x: x.shift(1).rolling(window=5, min_periods=1).mean()
+        lambda x: x.shift(1).ewm(span=10, min_periods=1).mean()
     )
+    df_rolled.columns = [f"{col}_EWMA" for col in df_rolled.columns]
     
-    # Rename columns to identify them as rolling stats
-    df_rolled.columns = [f"{col}_ROLLING" for col in df_rolled.columns]
+    # 2. Season Averages
+    df_season = df.groupby(['TEAM_ID', 'SEASON_ID'])[features_to_roll].transform(
+        lambda x: x.shift(1).expanding().mean()
+    )
+    df_season.columns = [f"{col}_SEASON" for col in df_season.columns]
     
-    # Combine
-    df = pd.concat([df, df_rolled], axis=1)
+    # 3. Win Pct (for Fatigue Scaling)
+    df['WIN_PCT'] = df.groupby(['TEAM_ID', 'SEASON_ID'])['WIN'].transform(
+        lambda x: x.shift(1).expanding().mean()
+    )
+
+    df = pd.concat([df, df_rolled, df_season], axis=1)
     
-    # Calculate Rest Days
+    # 4. Rest Days
     df['PREV_GAME_DATE'] = df.groupby('TEAM_ID')['GAME_DATE'].shift(1)
     df['DAYS_REST'] = (df['GAME_DATE'] - df['PREV_GAME_DATE']).dt.days.fillna(3)
-    df['DAYS_REST'] = df['DAYS_REST'].clip(upper=7) # Cap at 7 days
+    df['DAYS_REST'] = df['DAYS_REST'].clip(upper=7)
     
     return df
 
 def structure_data_for_model(df):
-    """
-    Merges the two rows per game (Home & Away) into one row for the model.
-    """
-    # Identify Home vs Away
-    df['IS_HOME'] = df['MATCHUP'].str.contains('vs.').astype(int)
+    print("🏗️ Structuring final dataset...")
     
+    df['IS_HOME'] = df['MATCHUP'].str.contains('vs.').astype(int)
     home_df = df[df['IS_HOME'] == 1].copy()
     away_df = df[df['IS_HOME'] == 0].copy()
     
-    # Merge on Game ID
     merged = pd.merge(home_df, away_df, on='GAME_ID', suffixes=('_H', '_A'))
     
-    # Select final columns for Training
-    # We keep the RESULT (PTS_H, PTS_A) and the FEATURES (Rolling stats)
+    # --- CALCULATE REBOUND % (Factor #4) ---
+    # Must be done AFTER merge because it requires Opponent stats
+    # ORB% = Home_ORB / (Home_ORB + Away_DRB)
+    
+    # We use the EWMA versions to predict future performance
+    merged['ORB_PCT_EWMA_H'] = merged['OREB_EWMA_H'] / (merged['OREB_EWMA_H'] + merged['DREB_EWMA_A'])
+    merged['ORB_PCT_EWMA_A'] = merged['OREB_EWMA_A'] / (merged['OREB_EWMA_A'] + merged['DREB_EWMA_H'])
+    
+    # Fill potential /0 errors
+    merged = merged.fillna(0)
+
+    merged['HOME_ALTITUDE'] = merged['TEAM_ID_H'].map(TEAM_ALTITUDES).fillna(0)
+    
+    # Fatigue Calculation
+    merged['FATIGUE_SCORE_H'] = np.where(merged['DAYS_REST_H'] <= 1, 1, 0) * (1 - merged['WIN_PCT_H'])
+    merged['FATIGUE_SCORE_A'] = np.where(merged['DAYS_REST_A'] <= 1, 1, 0) * (1 - merged['WIN_PCT_A'])
+
+    # Star Impact (Momentum)
+    merged['MOMENTUM_H'] = merged['OFF_RATING_EWMA_H'] / merged['OFF_RATING_SEASON_H']
+    merged['MOMENTUM_A'] = merged['OFF_RATING_EWMA_A'] / merged['OFF_RATING_SEASON_A']
+
     cols = [
-        'GAME_ID', 'GAME_DATE_H', 
-        'TEAM_NAME_H', 'PTS_H', 'PTS_ROLLING_H', 'FG_PCT_ROLLING_H', 'DAYS_REST_H',
-        'TEAM_NAME_A', 'PTS_A', 'PTS_ROLLING_A', 'FG_PCT_ROLLING_A', 'DAYS_REST_A'
+        'GAME_ID', 'GAME_DATE_H', 'PTS_H', 'PTS_A',
+        
+        # HOME FOUR FACTORS + CONTEXT
+        'EFG_PCT_EWMA_H', 'TOV_PCT_EWMA_H', 'ORB_PCT_EWMA_H', 'FT_RATE_EWMA_H', 
+        'FATIGUE_SCORE_H', 'MOMENTUM_H', 'HOME_ALTITUDE',
+        
+        # AWAY FOUR FACTORS + CONTEXT
+        'EFG_PCT_EWMA_A', 'TOV_PCT_EWMA_A', 'ORB_PCT_EWMA_A', 'FT_RATE_EWMA_A',
+        'FATIGUE_SCORE_A', 'MOMENTUM_A'
     ]
     
-    # If rolling stats are missing (start of season), drop them
-    return merged[cols].dropna()
-
-# ============================================================================
-# 3. MASTER FUNCTION (Run this to build dataset)
-# ============================================================================
+    # Remove early season noise where EWMA is 0
+    return merged[cols].replace([np.inf, -np.inf], 0).dropna()
 
 def build_training_dataset():
-    """
-    Fetches 2 years of data, processes it, and returns a clean DataFrame.
-    """
-    # Fetch last season and this season
-    df_23 = fetch_season_data('2022-23')
-    df_24 = fetch_season_data('2023-24')
-    
-    full_data = pd.concat([df_23, df_24])
-    
-    # Process
-    processed_df = calculate_advanced_features(full_data)
-    training_data = structure_data_for_model(processed_df)
-    
-    # Create Target: Did Home Team Win? (1 = Yes, 0 = No)
-    training_data['HOME_WIN'] = (training_data['PTS_H'] > training_data['PTS_A']).astype(int)
-    
-    print(f"✅ Dataset Ready: {len(training_data)} games.")
-    return training_data
+    full_data = fetch_all_history()
+    if full_data.empty: return pd.DataFrame()
 
-if __name__ == "__main__":
-    # Test run
-    df = build_training_dataset()
-    print(df.head())
-    # Optional: Save to CSV to inspect
-    df.to_csv('nba_final_training_data.csv', index=False)
+    step1 = calculate_four_factors(full_data)
+    step2 = calculate_rolling_features(step1)
+    final_df = structure_data_for_model(step2)
+    
+    final_df['HOME_WIN'] = (final_df['PTS_H'] > final_df['PTS_A']).astype(int)
+    
+    final_df.to_csv("nba_training_cache.csv", index=False)
+    print(f"✅ Four Factors Dataset Ready: {len(final_df)} games.")
+    return final_df

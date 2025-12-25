@@ -1,0 +1,27 @@
+{
+  "accuracy": 0.6153488372093023,
+  "best_params": {
+    "colsample_bytree": 0.8,
+    "learning_rate": 0.01,
+    "max_depth": 3,
+    "n_estimators": 300,
+    "scale_pos_weight": 0.85,
+    "subsample": 0.8
+  },
+  "features": [
+    "OFF_RATING_EWMA_H",
+    "POSS_EWMA_H",
+    "OFF_RATING_SEASON_H",
+    "FATIGUE_SCORE_H",
+    "MOMENTUM_H",
+    "HOME_ALTITUDE",
+    "OFF_RATING_EWMA_A",
+    "POSS_EWMA_A",
+    "OFF_RATING_SEASON_A",
+    "FATIGUE_SCORE_A",
+    "MOMENTUM_A"
+  ],
+  "train_size": 8599,
+  "test_size": 2150,
+  "date_range": "2015-10-27 00:00:00 to 2024-04-14 00:00:00"
+}

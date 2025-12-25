@@ -9,82 +9,12 @@ import { supabase } from './supabaseClient';
  * This data simulates what will eventually come from Supabase
  * Replace this with real API calls once backend is ready
  */
-const mockGames = [
-  {
-    id: '1',
-    homeTeam: 'Los Angeles Lakers',
-    awayTeam: 'Golden State Warriors',
-    date: 'Dec 20, 2025 - 7:30 PM',
-    homeProbability: 58,
-    awayProbability: 42,
-    status: 'upcoming'
-  },
-  {
-    id: '2',
-    homeTeam: 'Boston Celtics',
-    awayTeam: 'Miami Heat',
-    date: 'Dec 20, 2025 - 7:00 PM',
-    homeProbability: 65,
-    awayProbability: 35,
-    status: 'upcoming'
-  },
-  {
-    id: '3',
-    homeTeam: 'Milwaukee Bucks',
-    awayTeam: 'Philadelphia 76ers',
-    date: 'Dec 20, 2025 - 8:00 PM',
-    homeProbability: 52,
-    awayProbability: 48,
-    status: 'live'
-  },
-  {
-    id: '4',
-    homeTeam: 'Phoenix Suns',
-    awayTeam: 'Dallas Mavericks',
-    date: 'Dec 20, 2025 - 9:00 PM',
-    homeProbability: 61,
-    awayProbability: 39,
-    status: 'upcoming'
-  },
-  {
-    id: '5',
-    homeTeam: 'Denver Nuggets',
-    awayTeam: 'Los Angeles Clippers',
-    date: 'Dec 19, 2025 - 8:00 PM',
-    homeProbability: 55,
-    awayProbability: 45,
-    status: 'completed'
-  },
-  {
-    id: '6',
-    homeTeam: 'Brooklyn Nets',
-    awayTeam: 'Chicago Bulls',
-    date: 'Dec 20, 2025 - 7:30 PM',
-    homeProbability: 49,
-    awayProbability: 51,
-    status: 'upcoming'
-  }
-];
-
-/**
- * App Component - Main Dashboard
- *
- * This is the main dashboard that displays:
- * 1. A filter bar for searching and filtering games
- * 2. A grid of game prediction cards
- *
- * TODO - Future Implementation Steps:
- * - Replace mockGames with real data from Supabase
- * - Implement actual filter functionality (by date, team, status)
- * - Add real-time updates for live games
- * - Add pagination or infinite scroll for large datasets
- * - Add loading states and error handling
- */
-function App() {
-  const [games, setGames] = useState(mockGames);
+const App = () => {
+  const [games, setGames] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'upcoming', 'live', 'completed'
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   /**
    * Fetch game predictions from Supabase
@@ -95,67 +25,66 @@ function App() {
    */
   const fetchGames = async () => {
     setIsLoading(true);
+    setError(null);
 
     try {
-      // Query Supabase with nested joins
+      // Query Supabase - fetch predictions with game and team data
       const { data, error } = await supabase
         .from('game_predictions')
         .select(`
-          id,
-          home_win_probability,
-          away_win_probability,
-          confidence_score,
-          predicted_winner,
-          game:games!game_id (
-            id,
+          *,
+          games!game_predictions_game_id_fkey (
             game_id,
             game_date,
             status,
-            home_team:teams!games_home_team_id_fkey (
-              name,
-              abbreviation
-            ),
-            away_team:teams!games_away_team_id_fkey (
-              name,
-              abbreviation
-            )
+            home_team:home_team_id (name, abbreviation),
+            away_team:away_team_id (name, abbreviation)
           )
         `)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(20);
 
       if (error) {
         console.error('Supabase error:', error);
-        // Fallback to mock data on error
-        setGames(mockGames);
+        setError('Failed to load predictions. Please check your connection.');
+        setGames([]);
       } else if (data && data.length > 0) {
-        // Transform Supabase data to match our component format
-        const formattedGames = data.map(prediction => ({
-          id: prediction.id,
-          homeTeam: prediction.game.home_team.name,
-          awayTeam: prediction.game.away_team.name,
-          date: new Date(prediction.game.game_date).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit'
-          }),
-          homeProbability: Math.round(prediction.home_win_probability * 100),
-          awayProbability: Math.round(prediction.away_win_probability * 100),
-          status: prediction.game.status
-        }));
+        // Transform Supabase data to match component format
+        const formattedGames = data.map(prediction => {
+          const game = prediction.games;
+
+          let dateStr = 'TBD';
+          if (game?.game_date) {
+            dateStr = new Date(game.game_date).toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit'
+            });
+          }
+
+          return {
+            id: prediction.id,
+            homeTeam: game?.home_team?.name || 'Unknown',
+            awayTeam: game?.away_team?.name || 'Unknown',
+            date: dateStr,
+            homeProbability: Math.round((prediction.home_win_probability || 0) * 100),
+            awayProbability: Math.round((prediction.away_win_probability || 0) * 100),
+            status: game?.status || 'upcoming'
+          };
+        });
 
         setGames(formattedGames);
-        console.log(`✅ Loaded ${formattedGames.length} game(s) from Supabase`);
+        console.log(`✅ Loaded ${formattedGames.length} prediction(s) from Supabase`);
       } else {
-        // No data in database yet, use mock data
-        console.warn('⚠️ No predictions found in database, using mock data');
-        setGames(mockGames);
+        console.log('ℹ️ No predictions found in database');
+        setGames([]);
       }
     } catch (err) {
       console.error('Exception fetching games:', err);
-      // Fallback to mock data on exception
-      setGames(mockGames);
+      setError('An unexpected error occurred.');
+      setGames([]);
     } finally {
       setIsLoading(false);
     }
@@ -216,31 +145,28 @@ function App() {
             <div className="flex gap-2">
               <button
                 onClick={() => setFilterStatus('all')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  filterStatus === 'all'
-                    ? 'bg-nba-blue text-white'
-                    : 'bg-nba-darker text-gray-400 hover:text-white'
-                }`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === 'all'
+                  ? 'bg-nba-blue text-white'
+                  : 'bg-nba-darker text-gray-400 hover:text-white'
+                  }`}
               >
                 All Games
               </button>
               <button
                 onClick={() => setFilterStatus('upcoming')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  filterStatus === 'upcoming'
-                    ? 'bg-nba-blue text-white'
-                    : 'bg-nba-darker text-gray-400 hover:text-white'
-                }`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === 'upcoming'
+                  ? 'bg-nba-blue text-white'
+                  : 'bg-nba-darker text-gray-400 hover:text-white'
+                  }`}
               >
                 Upcoming
               </button>
               <button
                 onClick={() => setFilterStatus('live')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  filterStatus === 'live'
-                    ? 'bg-red-500 text-white'
-                    : 'bg-nba-darker text-gray-400 hover:text-white'
-                }`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === 'live'
+                  ? 'bg-red-500 text-white'
+                  : 'bg-nba-darker text-gray-400 hover:text-white'
+                  }`}
               >
                 Live
               </button>
@@ -262,6 +188,14 @@ function App() {
           {/* - Team selector */}
           {/* - Confidence threshold slider */}
         </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-3 rounded relative mb-6" role="alert">
+            <strong className="font-bold">Error: </strong>
+            <span className="block sm:inline">{error}</span>
+          </div>
+        )}
 
         {/* Games Grid */}
         {isLoading ? (
