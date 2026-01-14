@@ -27,7 +27,8 @@ const GameCard = ({ game }) => {
     date,
     homeProbability,
     awayProbability,
-    status = 'upcoming'
+    status = 'upcoming',
+    explanation = null
   } = game;
 
   // Determine which team is favored
@@ -117,6 +118,18 @@ const GameCard = ({ game }) => {
           </span>
         </div>
       </div>
+
+      {/* AI Explanation */}
+      {explanation && (
+        <div className="mt-3 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
+          <div className="flex items-start gap-2">
+            <div className="text-nba-blue mt-0.5">💡</div>
+            <p className="text-sm text-gray-300 leading-relaxed">
+              {explanation}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* TODO: Add click handler to show detailed prediction breakdown */}
       {/* TODO: Add favorite/bookmark functionality */}

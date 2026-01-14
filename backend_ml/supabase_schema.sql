@@ -65,6 +65,11 @@ CREATE TABLE IF NOT EXISTS game_predictions (
     predicted_winner VARCHAR(10) NOT NULL, -- 'Home' or 'Away'
     confidence_score DECIMAL(5,4), -- Max of home/away probability
 
+    -- Ensemble model details (individual model predictions)
+    xgb_home_prob DECIMAL(5,4), -- XGBoost home win probability
+    ridge_home_prob DECIMAL(5,4), -- Ridge Regression home win probability
+    models_agree BOOLEAN, -- TRUE if both models predict the same winner
+
     -- Model features (for transparency)
     home_efg_pct DECIMAL(5,4),
     away_efg_pct DECIMAL(5,4),
@@ -79,6 +84,9 @@ CREATE TABLE IF NOT EXISTS game_predictions (
     vegas_spread DECIMAL(4,1),
     model_edge DECIMAL(5,4), -- Difference from Vegas implied probability
 
+    -- AI-generated explanation
+    explanation TEXT, -- Natural language explanation from LLM
+
     -- Metadata
     model_version VARCHAR(20),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -88,6 +96,7 @@ CREATE TABLE IF NOT EXISTS game_predictions (
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_predictions_game_id ON game_predictions(game_id);
 CREATE INDEX IF NOT EXISTS idx_predictions_created_at ON game_predictions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_models_disagree ON game_predictions(models_agree) WHERE models_agree = false;
 
 -- ==============================================================================
 -- 4. TEAM_STATS TABLE (Optional - for historical tracking)
@@ -198,6 +207,21 @@ INSERT INTO teams (team_id, name, abbreviation, city, conference, division) VALU
 (1610612762, 'Utah Jazz', 'UTA', 'Utah', 'Western', 'Northwest'),
 (1610612764, 'Washington Wizards', 'WAS', 'Washington', 'Eastern', 'Southeast')
 ON CONFLICT (team_id) DO NOTHING;
+
+-- ==============================================================================
+-- 8. MIGRATION - Add ensemble model columns (for existing databases)
+-- ==============================================================================
+-- If you already have a database, run this to add the new ensemble columns:
+
+ALTER TABLE game_predictions
+ADD COLUMN IF NOT EXISTS xgb_home_prob DECIMAL(5,4),
+ADD COLUMN IF NOT EXISTS ridge_home_prob DECIMAL(5,4),
+ADD COLUMN IF NOT EXISTS models_agree BOOLEAN;
+
+-- Add index for model disagreements
+CREATE INDEX IF NOT EXISTS idx_models_disagree
+ON game_predictions(models_agree)
+WHERE models_agree = false;
 
 -- ==============================================================================
 -- DONE! Your database is ready for the NBA Predictor

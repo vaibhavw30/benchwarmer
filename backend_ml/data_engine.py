@@ -6,10 +6,10 @@ from supabase import create_client
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from elo_engine import generate_elo_features
 
-# Load from both .env files
-load_dotenv()  # Load root .env
-load_dotenv(Path(__file__).parent / '.env.local', override=True)  # Load local secrets
+load_dotenv()
+load_dotenv(Path(__file__).parent / '.env.local', override=True)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -39,7 +39,7 @@ def fetch_season_data(season):
 def fetch_all_history():
     seasons = [
         '2015-16', '2016-17', '2017-18', '2018-19', '2019-20',
-        '2020-21', '2021-22', '2022-23', '2023-24'
+        '2020-21', '2021-22', '2022-23', '2023-24', '2024-25', '2025-26'
     ]
     frames = []
     for s in seasons:
@@ -47,59 +47,38 @@ def fetch_all_history():
     return pd.concat(frames, ignore_index=True)
 
 def calculate_four_factors(df):
-    """
-    Calculates the 'Four Factors' + Possession Count.
-    """
-    # 1. Possessions (Standard Formula)
     df['POSS'] = df['FGA'] + 0.44*df['FTA'] - df['OREB'] + df['TOV']
-    
-    # 2. Effective Field Goal % (Shooting Efficiency)
     df['EFG_PCT'] = (df['FGM'] + 0.5 * df['FG3M']) / df['FGA']
-    
-    # 3. Turnover % (Ball Security)
     df['TOV_PCT'] = df['TOV'] / (df['FGA'] + 0.44*df['FTA'] + df['TOV'])
-    
-    # 4. Free Throw Rate (Aggression)
     df['FT_RATE'] = df['FTA'] / df['FGA']
-    
-    # 5. Offensive Rating (Points Efficiency)
     df['OFF_RATING'] = (df['PTS'] / df['POSS']) * 100
-    
-    # Win Indicator for Scaling
     df['WIN'] = df['WL'].map({'W': 1, 'L': 0})
-    
     return df
 
 def calculate_rolling_features(df):
     print("🔄 Calculating Four Factors EWMA...")
-    
     df['GAME_DATE'] = pd.to_datetime(df['GAME_DATE'])
     df = df.sort_values('GAME_DATE')
     
-    # We roll the Four Factors components. 
-    # Note: We roll OREB and DREB raw numbers so we can calc percentages dynamically later.
+    # We MUST roll 'DREB' to calculate Rebound Mismatch later
     features_to_roll = ['EFG_PCT', 'TOV_PCT', 'FT_RATE', 'OFF_RATING', 'OREB', 'DREB'] 
     
-    # 1. EWMA (Recent Form)
     df_rolled = df.groupby('TEAM_ID')[features_to_roll].transform(
         lambda x: x.shift(1).ewm(span=10, min_periods=1).mean()
     )
     df_rolled.columns = [f"{col}_EWMA" for col in df_rolled.columns]
     
-    # 2. Season Averages
     df_season = df.groupby(['TEAM_ID', 'SEASON_ID'])[features_to_roll].transform(
         lambda x: x.shift(1).expanding().mean()
     )
     df_season.columns = [f"{col}_SEASON" for col in df_season.columns]
     
-    # 3. Win Pct (for Fatigue Scaling)
     df['WIN_PCT'] = df.groupby(['TEAM_ID', 'SEASON_ID'])['WIN'].transform(
         lambda x: x.shift(1).expanding().mean()
     )
 
     df = pd.concat([df, df_rolled, df_season], axis=1)
     
-    # 4. Rest Days
     df['PREV_GAME_DATE'] = df.groupby('TEAM_ID')['GAME_DATE'].shift(1)
     df['DAYS_REST'] = (df['GAME_DATE'] - df['PREV_GAME_DATE']).dt.days.fillna(3)
     df['DAYS_REST'] = df['DAYS_REST'].clip(upper=7)
@@ -107,48 +86,49 @@ def calculate_rolling_features(df):
     return df
 
 def structure_data_for_model(df):
-    print("🏗️ Structuring final dataset...")
-    
+    print("🏗️ Structuring final dataset (Elo + Mismatches)...")
     df['IS_HOME'] = df['MATCHUP'].str.contains('vs.').astype(int)
     home_df = df[df['IS_HOME'] == 1].copy()
     away_df = df[df['IS_HOME'] == 0].copy()
     
     merged = pd.merge(home_df, away_df, on='GAME_ID', suffixes=('_H', '_A'))
     
-    # --- CALCULATE REBOUND % (Factor #4) ---
-    # Must be done AFTER merge because it requires Opponent stats
-    # ORB% = Home_ORB / (Home_ORB + Away_DRB)
-    
-    # We use the EWMA versions to predict future performance
+    # 1. Elo
+    merged = generate_elo_features(merged)
+
+    # 2. Style Mismatches
+    merged['REB_MISMATCH'] = merged['OREB_EWMA_H'] - merged['DREB_EWMA_A']
+    merged['TOV_MISMATCH'] = merged['TOV_PCT_EWMA_A'] - merged['TOV_PCT_EWMA_H']
+    merged['SHOOTING_GAP'] = merged['EFG_PCT_EWMA_H'] - merged['EFG_PCT_EWMA_A']
+
+    # 3. Standard Features
     merged['ORB_PCT_EWMA_H'] = merged['OREB_EWMA_H'] / (merged['OREB_EWMA_H'] + merged['DREB_EWMA_A'])
     merged['ORB_PCT_EWMA_A'] = merged['OREB_EWMA_A'] / (merged['OREB_EWMA_A'] + merged['DREB_EWMA_H'])
-    
-    # Fill potential /0 errors
     merged = merged.fillna(0)
 
     merged['HOME_ALTITUDE'] = merged['TEAM_ID_H'].map(TEAM_ALTITUDES).fillna(0)
     
-    # Fatigue Calculation
     merged['FATIGUE_SCORE_H'] = np.where(merged['DAYS_REST_H'] <= 1, 1, 0) * (1 - merged['WIN_PCT_H'])
     merged['FATIGUE_SCORE_A'] = np.where(merged['DAYS_REST_A'] <= 1, 1, 0) * (1 - merged['WIN_PCT_A'])
 
-    # Star Impact (Momentum)
     merged['MOMENTUM_H'] = merged['OFF_RATING_EWMA_H'] / merged['OFF_RATING_SEASON_H']
     merged['MOMENTUM_A'] = merged['OFF_RATING_EWMA_A'] / merged['OFF_RATING_SEASON_A']
 
     cols = [
         'GAME_ID', 'GAME_DATE_H', 'PTS_H', 'PTS_A',
+        'TEAM_ID_H', 'TEAM_ID_A',  # <--- FIXED: Added these back!
         
-        # HOME FOUR FACTORS + CONTEXT
+        # New Features
+        'ELO_H', 'ELO_A', 
+        'REB_MISMATCH', 'TOV_MISMATCH', 'SHOOTING_GAP',
+        
+        # Standard Features
         'EFG_PCT_EWMA_H', 'TOV_PCT_EWMA_H', 'ORB_PCT_EWMA_H', 'FT_RATE_EWMA_H', 
         'FATIGUE_SCORE_H', 'MOMENTUM_H', 'HOME_ALTITUDE',
-        
-        # AWAY FOUR FACTORS + CONTEXT
         'EFG_PCT_EWMA_A', 'TOV_PCT_EWMA_A', 'ORB_PCT_EWMA_A', 'FT_RATE_EWMA_A',
         'FATIGUE_SCORE_A', 'MOMENTUM_A'
     ]
     
-    # Remove early season noise where EWMA is 0
     return merged[cols].replace([np.inf, -np.inf], 0).dropna()
 
 def build_training_dataset():
@@ -162,5 +142,5 @@ def build_training_dataset():
     final_df['HOME_WIN'] = (final_df['PTS_H'] > final_df['PTS_A']).astype(int)
     
     final_df.to_csv("nba_training_cache.csv", index=False)
-    print(f"✅ Four Factors Dataset Ready: {len(final_df)} games.")
+    print(f"✅ Full Dataset Ready: {len(final_df)} games.")
     return final_df

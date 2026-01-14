@@ -15,8 +15,14 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 nba_api>=1.1.11  # Official NBA API wrapper
 beautifulsoup4>=4.12.0  # If scraping is needed
+lxml>=4.9.0  # HTML/XML parser for pandas read_html
+html5lib>=1.1  # Alternative HTML parser
 
-# Visualization (for model analysis)
+# AI/LLM
+openai>=1.0.0  # Azure OpenAI support
+pytz>=2023.3  # Timezone handling
+
+# Visualization (for model analysis and bias detection)
 matplotlib>=3.7.0
 seaborn>=0.12.0
 

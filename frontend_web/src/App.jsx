@@ -13,6 +13,7 @@ const App = () => {
   const [games, setGames] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'upcoming', 'live', 'completed'
+  const [minConfidence, setMinConfidence] = useState(0); // Confidence threshold (0-50)
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -28,7 +29,13 @@ const App = () => {
     setError(null);
 
     try {
+      // Get date 2 days ago to show recent and upcoming games
+      const twoDaysAgo = new Date();
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const filterDate = twoDaysAgo.toISOString().split('T')[0];
+
       // Query Supabase - fetch predictions with game and team data
+      // Filter to show only recent/upcoming games and sort by game date
       const { data, error } = await supabase
         .from('game_predictions')
         .select(`
@@ -41,8 +48,9 @@ const App = () => {
             away_team:away_team_id (name, abbreviation)
           )
         `)
-        .order('created_at', { ascending: false })
-        .limit(20);
+        .gte('date', filterDate)
+        .order('date', { ascending: false })
+        .limit(50);
 
       if (error) {
         console.error('Supabase error:', error);
@@ -50,18 +58,43 @@ const App = () => {
         setGames([]);
       } else if (data && data.length > 0) {
         // Transform Supabase data to match component format
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Reset to midnight for date comparison
+
         const formattedGames = data.map(prediction => {
           const game = prediction.games;
 
           let dateStr = 'TBD';
+          let gameDate = null;
+
           if (game?.game_date) {
-            dateStr = new Date(game.game_date).toLocaleString('en-US', {
+            // Parse date as local time, not UTC, to avoid timezone shift
+            const dateParts = game.game_date.split('-');
+            gameDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+            dateStr = gameDate.toLocaleString('en-US', {
               month: 'short',
               day: 'numeric',
               year: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit'
+              weekday: 'short'
             });
+          }
+
+          // Determine game status based on date
+          let gameStatus = game?.status || 'upcoming';
+          if (gameDate) {
+            const gameDateMidnight = new Date(gameDate);
+            gameDateMidnight.setHours(0, 0, 0, 0);
+
+            if (gameDateMidnight < today) {
+              // Past games - check if we have actual status, otherwise mark as completed
+              gameStatus = game?.status === 'live' ? 'live' : 'completed';
+            } else if (gameDateMidnight.getTime() === today.getTime()) {
+              // Today's games - mark as upcoming (or actual status if available)
+              gameStatus = game?.status || 'upcoming';
+            } else {
+              // Future games
+              gameStatus = 'upcoming';
+            }
           }
 
           return {
@@ -71,7 +104,8 @@ const App = () => {
             date: dateStr,
             homeProbability: Math.round((prediction.home_win_probability || 0) * 100),
             awayProbability: Math.round((prediction.away_win_probability || 0) * 100),
-            status: game?.status || 'upcoming'
+            status: gameStatus,
+            explanation: prediction.explanation || null
           };
         });
 
@@ -95,8 +129,7 @@ const App = () => {
   }, []);
 
   /**
-   * Filter games based on search term and status
-   * TODO: Implement more advanced filtering (date range, team, etc.)
+   * Filter games based on search term, status, and confidence threshold
    */
   const filteredGames = games.filter(game => {
     const matchesSearch =
@@ -105,7 +138,11 @@ const App = () => {
 
     const matchesStatus = filterStatus === 'all' || game.status === filterStatus;
 
-    return matchesSearch && matchesStatus;
+    // Calculate confidence (spread between probabilities)
+    const confidence = Math.abs(game.homeProbability - game.awayProbability);
+    const matchesConfidence = confidence >= minConfidence;
+
+    return matchesSearch && matchesStatus && matchesConfidence;
   });
 
   return (
@@ -117,10 +154,10 @@ const App = () => {
         {/* Header */}
         <div className="mb-8">
           <h2 className="text-3xl font-bold text-white mb-2">
-            Today's Predictions
+            Recent & Upcoming Games
           </h2>
           <p className="text-gray-400">
-            AI-powered win probability predictions for upcoming NBA games
+            AI-powered win probability predictions with GPT-5.2 explanations
           </p>
         </div>
 
@@ -183,10 +220,34 @@ const App = () => {
             </button>
           </div>
 
-          {/* TODO: Add more filter options */}
-          {/* - Date range picker */}
-          {/* - Team selector */}
-          {/* - Confidence threshold slider */}
+          {/* Confidence Filter Slider */}
+          <div className="mt-4 pt-4 border-t border-gray-800">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm text-gray-400 flex items-center gap-2">
+                <Filter className="w-4 h-4" />
+                Min Confidence (Spread)
+              </label>
+              <span className="text-sm font-medium text-nba-blue">
+                {minConfidence}%+
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="50"
+              step="5"
+              value={minConfidence}
+              onChange={(e) => setMinConfidence(Number(e.target.value))}
+              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
+              style={{
+                background: `linear-gradient(to right, #1d4ed8 0%, #1d4ed8 ${(minConfidence / 50) * 100}%, #374151 ${(minConfidence / 50) * 100}%, #374151 100%)`
+              }}
+            />
+            <div className="flex justify-between text-xs text-gray-600 mt-1">
+              <span>All Games</span>
+              <span>High Confidence Only</span>
+            </div>
+          </div>
         </div>
 
         {/* Error Message */}

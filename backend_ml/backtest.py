@@ -1,206 +1,142 @@
-"""
-NBA Model Backtesting Script
-
-Tests the trained model against historical data to evaluate:
-- Accuracy over time
-- Performance by confidence level
-- ROI if betting against Vegas spreads
-- Home/Away prediction accuracy
-"""
-
 import pandas as pd
-import numpy as np
 import joblib
-from datetime import datetime
-from data_engine import TEAM_ALTITUDES
+import os
+import json
+import numpy as np
+from datetime import datetime, timedelta
+from sklearn.metrics import accuracy_score, classification_report
+from data_engine import build_training_dataset
 
 MODEL_PATH = "xgboost_nba_model.pkl"
-CACHE_PATH = "nba_training_cache.csv"
+RIDGE_MODEL_PATH = "ridge_nba_model.pkl"
+SCALER_PATH = "feature_scaler.pkl"
+ENSEMBLE_WEIGHTS_PATH = "ensemble_weights.json"
 
-def backtest_model():
-    """
-    Backtests the model on the test set from the training data.
-    """
-    print("\n" + "="*80)
-    print("🔬 NBA MODEL BACKTESTING")
-    print("="*80 + "\n")
+def run_backtest(days_back=7):
+    print("⏳ Loading Data for Backtest...")
+    
+    # 1. Load Data (Force fresh build to ensure recent games are included)
+    # If your cache is old, delete it first or this won't see yesterday's games
+    if os.path.exists("nba_training_cache.csv"):
+        df = pd.read_csv("nba_training_cache.csv")
+    else:
+        df = build_training_dataset()
+        
+    print("🧠 Loading Models...")
+    xgb_model = joblib.load(MODEL_PATH)
+    ridge_model = joblib.load(RIDGE_MODEL_PATH)
+    scaler = joblib.load(SCALER_PATH)
 
-    # Load model
-    print("📦 Loading model...")
+    # Load weights
     try:
-        model = joblib.load(MODEL_PATH)
-        print(f"   ✓ Model loaded\n")
-    except FileNotFoundError:
-        print("❌ Model not found. Run train_model.py first.")
-        return False
+        with open(ENSEMBLE_WEIGHTS_PATH, 'r') as f:
+            weights_config = json.load(f)
+        xgb_weight = weights_config['xgb_weight']
+        ridge_weight = weights_config['ridge_weight']
+        print(f"📊 Loaded ensemble weights: XGB={xgb_weight:.1f}, Ridge={ridge_weight:.1f}")
+    except:
+        xgb_weight, ridge_weight = 0.5, 0.5
+        print(f"⚠️  Using default ensemble weights: 50/50")
+    
+    # 2. Filter for "Recent Past"
+    # Convert dates
+    df['GAME_DATE_H'] = pd.to_datetime(df['GAME_DATE_H'])
+    
+    # Get range
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days_back)
+    
+    # Filter
+    recent_games = df[(df['GAME_DATE_H'] >= start_date) & (df['GAME_DATE_H'] < end_date)].copy()
+    
+    if recent_games.empty:
+        print(f"❌ No games found in the last {days_back} days.")
+        print("💡 Hint: Delete 'nba_training_cache.csv' and run 'data_engine.py' to fetch fresh stats.")
+        return
 
-    # Load data
-    print("📊 Loading historical data...")
-    try:
-        df = pd.read_csv(CACHE_PATH)
-        print(f"   ✓ Loaded {len(df):,} games\n")
-    except FileNotFoundError:
-        print("❌ Cache not found. Run train_model.py first.")
-        return False
-
-    # Features (must match train_model.py)
+    print(f"\n🧪 Backtesting on {len(recent_games)} games from {start_date.date()} to {end_date.date()}...\n")
+    
+    # 3. Prepare Features (Must match train_model.py EXACTLY)
     features = [
+        # --- ELO ---
+        'ELO_H', 'ELO_A',
+
+        # --- NEW MISMATCHES ---
+        'REB_MISMATCH', 'TOV_MISMATCH', 'SHOOTING_GAP',
+
+        # --- HOME ---
         'EFG_PCT_EWMA_H', 'TOV_PCT_EWMA_H', 'ORB_PCT_EWMA_H', 'FT_RATE_EWMA_H',
         'FATIGUE_SCORE_H', 'MOMENTUM_H', 'HOME_ALTITUDE',
+
+        # --- AWAY ---
         'EFG_PCT_EWMA_A', 'TOV_PCT_EWMA_A', 'ORB_PCT_EWMA_A', 'FT_RATE_EWMA_A',
         'FATIGUE_SCORE_A', 'MOMENTUM_A'
     ]
+    target = 'HOME_WIN'
+    
+    X = recent_games[features]
+    y_actual = recent_games[target]
+    X_scaled = scaler.transform(X)
 
-    # Use last 15% as backtest set (similar to test set)
-    df = df.sort_values('GAME_DATE_H')
-    backtest_start_idx = int(len(df) * 0.85)
-    backtest_df = df.iloc[backtest_start_idx:].copy()
+    # 4. PREDICT WITH ALL MODELS
+    # XGBoost
+    xgb_preds = xgb_model.predict(X)
+    xgb_probs = xgb_model.predict_proba(X)[:, 1]
 
-    print(f"📅 Backtest Period:")
-    print(f"   Date Range: {backtest_df['GAME_DATE_H'].min()} to {backtest_df['GAME_DATE_H'].max()}")
-    print(f"   Games: {len(backtest_df):,}\n")
+    # Ridge
+    ridge_preds = ridge_model.predict(X_scaled)
+    ridge_decision = ridge_model.decision_function(X_scaled)
+    ridge_probs = 1 / (1 + np.exp(-ridge_decision))
 
-    # Make predictions
-    print("🔮 Generating predictions...")
-    X_backtest = backtest_df[features]
-    y_true = backtest_df['HOME_WIN']
+    # Ensemble
+    ensemble_probs = xgb_weight * xgb_probs + ridge_weight * ridge_probs
+    ensemble_preds = (ensemble_probs > 0.5).astype(int)
 
-    # Get probabilities
-    y_pred_proba = model.predict_proba(X_backtest)[:, 1]  # Home win probability
-    y_pred = (y_pred_proba > 0.5).astype(int)
+    # 5. SCORE ALL THREE
+    recent_games['XGB_PRED'] = xgb_preds
+    recent_games['XGB_PROB'] = xgb_probs
+    recent_games['XGB_CORRECT'] = (xgb_preds == recent_games['HOME_WIN'])
 
-    backtest_df['PRED_HOME_WIN'] = y_pred
-    backtest_df['PRED_PROB'] = y_pred_proba
+    recent_games['RIDGE_PRED'] = ridge_preds
+    recent_games['RIDGE_PROB'] = ridge_probs
+    recent_games['RIDGE_CORRECT'] = (ridge_preds == recent_games['HOME_WIN'])
 
-    # Overall Accuracy
-    accuracy = (y_pred == y_true).mean()
-    print(f"\n{'='*80}")
-    print(f"📊 OVERALL PERFORMANCE")
-    print(f"{'='*80}")
-    print(f"Total Games: {len(backtest_df):,}")
-    print(f"Accuracy: {accuracy:.2%}")
-    print(f"Correct Predictions: {(y_pred == y_true).sum():,}")
-    print(f"Incorrect Predictions: {(y_pred != y_true).sum():,}")
+    recent_games['ENSEMBLE_PRED'] = ensemble_preds
+    recent_games['ENSEMBLE_PROB'] = ensemble_probs
+    recent_games['ENSEMBLE_CORRECT'] = (ensemble_preds == recent_games['HOME_WIN'])
 
-    # Accuracy by Confidence Level
-    print(f"\n{'='*80}")
-    print(f"📈 ACCURACY BY CONFIDENCE LEVEL")
-    print(f"{'='*80}")
+    # Calculate accuracies
+    xgb_acc = accuracy_score(y_actual, xgb_preds)
+    ridge_acc = accuracy_score(y_actual, ridge_preds)
+    ensemble_acc = accuracy_score(y_actual, ensemble_preds)
+    
+    # 6. DISPLAY COMPARATIVE RESULTS
+    print(f"\n📊 BACKTEST RESULTS (Last {days_back} Days)")
+    print(f"========================================")
+    print(f"🤖 XGBoost:  {xgb_acc:.1%} ({recent_games['XGB_CORRECT'].sum()}/{len(recent_games)})")
+    print(f"📏 Ridge:    {ridge_acc:.1%} ({recent_games['RIDGE_CORRECT'].sum()}/{len(recent_games)})")
+    print(f"✨ Ensemble: {ensemble_acc:.1%} ({recent_games['ENSEMBLE_CORRECT'].sum()}/{len(recent_games)})")
+    print(f"========================================\n")
 
-    confidence_levels = [
-        ('All Predictions', 0.0, 1.0),
-        ('Low Confidence (50-55%)', 0.50, 0.55),
-        ('Medium Confidence (55-60%)', 0.55, 0.60),
-        ('High Confidence (60-65%)', 0.60, 0.65),
-        ('Very High Confidence (65%+)', 0.65, 1.0),
-    ]
+    # 7. PER-GAME BREAKDOWN
+    recent_games['ACTUAL_WINNER'] = np.where(recent_games['HOME_WIN'] == 1, 'Home', 'Away')
 
-    for label, min_conf, max_conf in confidence_levels:
-        # Consider both home and away predictions
-        home_conf_mask = (y_pred_proba >= min_conf) & (y_pred_proba <= max_conf)
-        away_conf_mask = ((1 - y_pred_proba) >= min_conf) & ((1 - y_pred_proba) <= max_conf)
-        mask = home_conf_mask | away_conf_mask
+    for _, game in recent_games.iterrows():
+        result_icon = "✅" if game['ENSEMBLE_CORRECT'] else "❌"
 
-        if mask.sum() > 0:
-            conf_accuracy = (y_pred[mask] == y_true[mask]).mean()
-            print(f"{label:30} {mask.sum():5} games → {conf_accuracy:.2%} accuracy")
+        print(f"{result_icon} Date: {game['GAME_DATE_H'].date()} | Game ID: {game['GAME_ID']}")
+        print(f"   Actual: {'Home' if game['HOME_WIN'] else 'Away'} Win")
+        print(f"   🤖 XGB:      {'Home' if game['XGB_PRED'] else 'Away'} ({game['XGB_PROB']:.1%}) {'✓' if game['XGB_CORRECT'] else '✗'}")
+        print(f"   📏 Ridge:    {'Home' if game['RIDGE_PRED'] else 'Away'} ({game['RIDGE_PROB']:.1%}) {'✓' if game['RIDGE_CORRECT'] else '✗'}")
+        print(f"   ✨ Ensemble: {'Home' if game['ENSEMBLE_PRED'] else 'Away'} ({game['ENSEMBLE_PROB']:.1%}) {'✓' if game['ENSEMBLE_CORRECT'] else '✗'}")
 
-    # Home vs Away Performance
-    print(f"\n{'='*80}")
-    print(f"🏠 HOME VS AWAY PREDICTIONS")
-    print(f"{'='*80}")
+        # Highlight ensemble rescues
+        if game['ENSEMBLE_CORRECT'] and not game['XGB_CORRECT']:
+            print(f"   🎯 Ensemble rescued XGBoost mistake!")
+        elif game['ENSEMBLE_CORRECT'] and not game['RIDGE_CORRECT']:
+            print(f"   🎯 Ensemble rescued Ridge mistake!")
 
-    home_pred_mask = y_pred == 1
-    away_pred_mask = y_pred == 0
-
-    if home_pred_mask.sum() > 0:
-        home_accuracy = (y_pred[home_pred_mask] == y_true[home_pred_mask]).mean()
-        print(f"Predicted Home Wins: {home_pred_mask.sum():,} games → {home_accuracy:.2%} accuracy")
-
-    if away_pred_mask.sum() > 0:
-        away_accuracy = (y_pred[away_pred_mask] == y_true[away_pred_mask]).mean()
-        print(f"Predicted Away Wins: {away_pred_mask.sum():,} games → {away_accuracy:.2%} accuracy")
-
-    # Monthly Performance
-    print(f"\n{'='*80}")
-    print(f"📅 PERFORMANCE BY MONTH")
-    print(f"{'='*80}")
-
-    backtest_df['GAME_MONTH'] = pd.to_datetime(backtest_df['GAME_DATE_H']).dt.to_period('M')
-    monthly_stats = []
-
-    for month in backtest_df['GAME_MONTH'].unique():
-        month_mask = backtest_df['GAME_MONTH'] == month
-        month_df = backtest_df[month_mask]
-
-        if len(month_df) > 0:
-            month_accuracy = (month_df['PRED_HOME_WIN'] == month_df['HOME_WIN']).mean()
-            monthly_stats.append({
-                'Month': str(month),
-                'Games': len(month_df),
-                'Accuracy': month_accuracy
-            })
-
-    monthly_df = pd.DataFrame(monthly_stats).sort_values('Month')
-    for _, row in monthly_df.iterrows():
-        print(f"{row['Month']:10} {row['Games']:4} games → {row['Accuracy']:.2%}")
-
-    # Edge Cases Analysis
-    print(f"\n{'='*80}")
-    print(f"🔍 EDGE CASES ANALYSIS")
-    print(f"{'='*80}")
-
-    # Altitude games
-    altitude_mask = backtest_df['HOME_ALTITUDE'] > 0
-    if altitude_mask.sum() > 0:
-        altitude_acc = (backtest_df.loc[altitude_mask, 'PRED_HOME_WIN'] == backtest_df.loc[altitude_mask, 'HOME_WIN']).mean()
-        print(f"High Altitude Games (DEN/UTA): {altitude_mask.sum():,} games → {altitude_acc:.2%}")
-
-    # Fatigue games
-    fatigue_mask = (backtest_df['FATIGUE_SCORE_A'] > 0.4)
-    if fatigue_mask.sum() > 0:
-        fatigue_acc = (backtest_df.loc[fatigue_mask, 'PRED_HOME_WIN'] == backtest_df.loc[fatigue_mask, 'HOME_WIN']).mean()
-        print(f"Heavy Away Fatigue: {fatigue_mask.sum():,} games → {fatigue_acc:.2%}")
-
-    # Betting Simulation (simple)
-    print(f"\n{'='*80}")
-    print(f"💰 BETTING SIMULATION")
-    print(f"{'='*80}")
-
-    # Simulate betting $100 on each high-confidence prediction (>60%)
-    bet_amount = 100
-    high_conf_mask = ((y_pred_proba >= 0.60) | (y_pred_proba <= 0.40))
-
-    if high_conf_mask.sum() > 0:
-        bets = backtest_df[high_conf_mask].copy()
-        total_bets = len(bets)
-        wins = (bets['PRED_HOME_WIN'] == bets['HOME_WIN']).sum()
-        losses = total_bets - wins
-
-        # Simple calculation (assuming -110 odds)
-        profit_per_win = bet_amount * 0.91  # Win $91 on $100 bet at -110
-        loss_per_loss = bet_amount
-
-        total_profit = (wins * profit_per_win) - (losses * loss_per_loss)
-        roi = (total_profit / (total_bets * bet_amount)) * 100
-
-        print(f"High Confidence Bets (>60% or <40%):")
-        print(f"   Total Bets: {total_bets:,}")
-        print(f"   Wins: {wins:,} ({wins/total_bets*100:.1f}%)")
-        print(f"   Losses: {losses:,} ({losses/total_bets*100:.1f}%)")
-        print(f"   Total Profit/Loss: ${total_profit:,.2f}")
-        print(f"   ROI: {roi:.2f}%")
-        print(f"\n   Note: This assumes -110 odds on all bets (not realistic)")
-
-    # Save detailed results
-    output_file = 'backtest_results.csv'
-    backtest_df[['GAME_DATE_H', 'PTS_H', 'PTS_A', 'HOME_WIN', 'PRED_HOME_WIN', 'PRED_PROB']].to_csv(output_file, index=False)
-    print(f"\n💾 Detailed results saved to: {output_file}")
-
-    print(f"\n{'='*80}\n")
-    return True
+        print("-" * 50)
 
 if __name__ == "__main__":
-    import sys
-    success = backtest_model()
-    sys.exit(0 if success else 1)
+    run_backtest(7)
