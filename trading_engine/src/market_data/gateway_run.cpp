@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 
@@ -91,6 +92,10 @@ void MarketDataGateway::run(const std::vector<Ticker>& watchlist) {
   ssl::context ctx(ssl::context::tlsv12_client);
   ctx.set_default_verify_paths();
   ctx.set_verify_mode(ssl::verify_peer);
+  // Verify the presented cert's identity actually matches kHost. verify_peer +
+  // default CA paths alone only prove the cert is CA-trusted for *some* domain;
+  // without this callback any valid cert for any host would pass (MITM gap).
+  ctx.set_verify_callback(ssl::host_name_verification(kHost));
 
   tcp::resolver resolver(ioc);
   websocket::stream<beast::ssl_stream<beast::tcp_stream>> ws(ioc, ctx);
@@ -122,11 +127,19 @@ void MarketDataGateway::run(const std::vector<Ticker>& watchlist) {
   ws.write(net::buffer(sub.dump()));
 
   beast::flat_buffer buffer;
-  for (;;) {
-    buffer.clear();
-    ws.read(buffer);
-    if (!ws.got_text()) continue;
-    handle_raw(std::string_view(static_cast<const char*>(buffer.data().data()), buffer.size()));
+  while (!stop_) {
+    try {
+      buffer.clear();
+      ws.read(buffer);
+      if (!ws.got_text()) continue;
+      handle_raw(std::string_view(static_cast<const char*>(buffer.data().data()), buffer.size()));
+    } catch (const std::exception& e) {
+      // Beast's synchronous read() throws on any disconnect. Fail safe: log and
+      // break cleanly rather than letting the exception std::terminate the
+      // process on the first transient drop.
+      std::cerr << "[gateway] websocket read loop stopped: " << e.what() << '\n';
+      break;  // TODO(Task 20): reconnect-with-backoff + resubscribe
+    }
   }
 }
 
