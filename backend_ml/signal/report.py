@@ -49,7 +49,13 @@ def _cmd_evaluate(args):
     # Heavy, real-artifact path lives here only.
     import joblib
     import sys
-    sys.path.insert(0, "backend_ml")            # data_engine script-style imports
+    # Append (not insert-0) the absolute backend_ml/ dir so data_engine's
+    # script-style imports resolve WITHOUT letting backend_ml/signal/ shadow
+    # the stdlib `signal` module for a downstream bare `import signal`
+    # (joblib/sklearn/numpy). See before-live-checklist F.
+    _bml = str(Path(__file__).resolve().parents[1])   # backend_ml/ dir
+    if _bml not in sys.path:
+        sys.path.append(_bml)
     from data_engine import build_training_dataset
     from backend_ml.signal import dataset as ds
 

@@ -46,11 +46,15 @@ def build_fair_values(predictions, watchlist, recalibrator=None):
 
 
 def main():
-    # Import predict lazily (heavy deps). Put backend_ml/ on sys.path so
-    # predict.py's script-style imports (e.g. `from data_engine import ...`)
-    # resolve.
+    # Import predict lazily (heavy deps). Append (not insert-0) the backend_ml/
+    # dir so predict.py's script-style imports (e.g. `from data_engine import
+    # ...`) resolve WITHOUT letting backend_ml/signal/ shadow the stdlib
+    # `signal` module for a downstream bare `import signal`. See
+    # before-live-checklist F.
     import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parent))  # backend_ml/ dir
+    _bml = str(Path(__file__).resolve().parent)  # backend_ml/ dir
+    if _bml not in sys.path:
+        sys.path.append(_bml)
     from predict import predict_games
 
     wl_path = os.getenv("WATCHLIST_PATH", "trading_engine/config/watchlist.json")
