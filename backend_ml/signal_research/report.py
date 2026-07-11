@@ -14,6 +14,7 @@ from backend_ml.signal_research import clv as clv_mod
 from backend_ml.signal_research import config
 
 ARTIFACT_PATH = "backend_ml/signal_research/artifacts/recalibrator.json"
+DEFAULT_PLOT_PATH = "backend_ml/signal_research/artifacts/reliability.png"
 SNAPSHOTS_PATH = os.getenv("MARKET_SNAPSHOTS_PATH",
                            "backend_ml/signal_research/artifacts/market_snapshots.jsonl")
 
@@ -76,6 +77,15 @@ def _cmd_evaluate(args):
     df = ds.build_recompute_dataset(games, xgb, ridge, scaler, weights)
     out = run_evaluate(df, method=args.method)
     print(json.dumps(out, indent=2, default=str))
+    if getattr(args, "plot", None) and not out.get("insufficient"):
+        from backend_ml.signal_research import plots
+        from backend_ml.signal_research.recalibration import Recalibrator
+        recal = Recalibrator.load(out["artifact"])
+        c = out["calibration"]
+        title = (f"Reliability — Brier {c['brier']:.4f}  ECE {c['ece']:.3f}  "
+                 f"n={c['n']}")
+        path = plots.plot_reliability(c, args.plot, recalibrator=recal, title=title)
+        print(f"wrote plot -> {path}")
 
 
 def _cmd_clv_report(args):
@@ -97,6 +107,9 @@ def main(argv=None):
 
     pe = sub.add_parser("evaluate")
     pe.add_argument("--method", default="isotonic", choices=["isotonic", "platt"])
+    pe.add_argument("--plot", metavar="PATH", nargs="?", const=DEFAULT_PLOT_PATH,
+                    help="write a reliability-diagram PNG (default: "
+                         "artifacts/reliability.png)")
     pe.set_defaults(func=_cmd_evaluate)
 
     pc = sub.add_parser("clv-report")
