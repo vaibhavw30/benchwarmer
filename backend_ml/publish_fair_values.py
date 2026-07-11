@@ -34,7 +34,12 @@ def build_fair_values(predictions, watchlist):
 
 
 def main():
-    from backend_ml.predict import predict_games  # imported lazily; heavy deps
+    # Import predict lazily (heavy deps). Put backend_ml/ on sys.path so
+    # predict.py's script-style imports (e.g. `from data_engine import ...`)
+    # resolve.
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent))  # backend_ml/ dir
+    from predict import predict_games
 
     wl_path = os.getenv("WATCHLIST_PATH", "trading_engine/config/watchlist.json")
     out_path = os.getenv("FAIR_VALUES_PATH", "trading_engine/fair_values.json")
