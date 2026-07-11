@@ -32,3 +32,7 @@ target_link_libraries(te_tests PRIVATE te_core te_lib GTest::gtest_main
 target_include_directories(te_tests PRIVATE src)
 include(GoogleTest)
 gtest_discover_tests(te_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(te_engine src/main.cpp)
+target_link_libraries(te_engine PRIVATE te_lib)
+target_include_directories(te_engine PRIVATE src)
