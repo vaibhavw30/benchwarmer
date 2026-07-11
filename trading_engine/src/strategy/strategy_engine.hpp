@@ -33,5 +33,10 @@ class StrategyEngine {
   PaperVenue& venue_;
   Telemetry& tel_;
   std::string kill_file_;
+  // Running total of PaperVenue's cumulative realized P&L last reported to
+  // RiskManager. Feeding RiskManager the delta each fill (rather than the
+  // running total) keeps its own accumulator equal to the venue's cumulative
+  // realized P&L, which is what actually trips the daily-loss kill switch.
+  int last_realized_cents_ = 0;
 };
 }  // namespace te

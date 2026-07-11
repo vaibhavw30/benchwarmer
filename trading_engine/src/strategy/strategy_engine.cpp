@@ -38,6 +38,9 @@ void StrategyEngine::on_book_update(const Ticker& t, const OrderBook& b, long no
       o.qty = d.approved_qty;
       venue_.place_against(b, o);
       risk_.set_position(t, venue_.position(t));
+      int cur_realized = venue_.realized_pnl_cents();
+      risk_.record_realized_pnl(cur_realized - last_realized_cents_);
+      last_realized_cents_ = cur_realized;
       tel_.event("arb", {{"ticker", t},
                           {"qty", d.approved_qty},
                           {"yes", s.yes_price},
@@ -55,6 +58,9 @@ void StrategyEngine::on_book_update(const Ticker& t, const OrderBook& b, long no
       o.qty = d.approved_qty;
       venue_.place_against(b, o);
       risk_.set_position(t, venue_.position(t));
+      int cur_realized = venue_.realized_pnl_cents();
+      risk_.record_realized_pnl(cur_realized - last_realized_cents_);
+      last_realized_cents_ = cur_realized;
       tel_.event("take", {{"ticker", t}, {"price", s.price}, {"qty", d.approved_qty}});
     }
     return;

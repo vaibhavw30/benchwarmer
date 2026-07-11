@@ -25,8 +25,11 @@ def build_fair_values(predictions, watchlist):
             continue
         rows.append({
             "ticker": ticker,
-            "p_yes": float(p["home_win_probability"]),   # YES = home wins
-            "confidence": float(p["confidence_score"]),
+            # Clamp to [0,1] at the boundary: a bad/out-of-range model value
+            # here must not propagate into edge_threshold_cents (which can go
+            # <= 0 for confidence outside [0,1]) or into a nonsensical price.
+            "p_yes": max(0.0, min(1.0, float(p["home_win_probability"]))),   # YES = home wins
+            "confidence": max(0.0, min(1.0, float(p["confidence_score"]))),
             "asof": datetime.datetime.utcnow().isoformat() + "Z",
             "game_id": p["game_id"],
         })

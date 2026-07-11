@@ -6,6 +6,11 @@
 #include "execution/order_venue.hpp"
 namespace te {
 struct RiskDecision { bool allow; std::string reason; int approved_qty; };
+// NOTE(v1 scope): Config::max_aggregate_exposure_cents and
+// Config::orders_per_sec_budget are loaded but NOT enforced by this class in
+// v1 -- only max_order_size, max_contracts_per_market, and max_daily_loss_cents
+// gate orders below. Don't read the "fail-closed" behavior as covering
+// aggregate exposure or order-rate limits.
 class RiskManager {
  public:
   explicit RiskManager(const Config& c) : c_(c) {}
