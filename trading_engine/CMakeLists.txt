@@ -20,10 +20,15 @@ enable_testing()
 add_library(te_core INTERFACE)
 target_include_directories(te_core INTERFACE src)
 
+file(GLOB LIB_SRCS src/*/*.cpp)
+add_library(te_lib STATIC ${LIB_SRCS})
+target_include_directories(te_lib PUBLIC src)
+target_link_libraries(te_lib PUBLIC nlohmann_json::nlohmann_json simdjson OpenSSL::Crypto OpenSSL::SSL)
+
 file(GLOB TEST_SRCS tests/*.cpp)
 add_executable(te_tests ${TEST_SRCS})
-target_link_libraries(te_tests PRIVATE te_core GTest::gtest_main
+target_link_libraries(te_tests PRIVATE te_core te_lib GTest::gtest_main
   nlohmann_json::nlohmann_json simdjson OpenSSL::Crypto OpenSSL::SSL)
 target_include_directories(te_tests PRIVATE src)
 include(GoogleTest)
-gtest_discover_tests(te_tests)
+gtest_discover_tests(te_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
