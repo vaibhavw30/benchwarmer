@@ -1,0 +1,9 @@
+{"type":"orderbook_snapshot","msg":{"market_ticker":"T","yes":[[40,50]],"no":[[52,50]]}}
+{"type":"orderbook_delta","msg":{"market_ticker":"T","price":52,"delta":-50,"side":"no"}}
+{"type":"orderbook_delta","msg":{"market_ticker":"T","price":52,"delta":50,"side":"no"}}
+{"type":"orderbook_delta","msg":{"market_ticker":"T","price":95,"delta":10,"side":"yes"}}
+{"type":"orderbook_delta","msg":{"market_ticker":"T","price":95,"delta":-10,"side":"yes"}}
+{"type":"orderbook_delta","msg":{"market_ticker":"T","price":52,"delta":-50,"side":"no"}}
+{"type":"orderbook_delta","msg":{"market_ticker":"T","price":30,"delta":40,"side":"no"}}
+{"type":"orderbook_delta","msg":{"market_ticker":"T","price":66,"delta":30,"side":"yes"}}
+{"type":"orderbook_delta","msg":{"market_ticker":"T","price":66,"delta":-30,"side":"yes"}}
