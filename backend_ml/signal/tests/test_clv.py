@@ -55,3 +55,8 @@ def test_clv_report_empty_is_insufficient_not_crash():
     assert rep["n"] == 0
     assert rep["insufficient"] is True
     assert rep["mean_clv_cents"] is None
+
+
+def test_moment_constants_match_stored_keys():
+    from backend_ml.signal.market_capture import ENTRY_MOMENT, CLOSING_MOMENT
+    assert (ENTRY_MOMENT, CLOSING_MOMENT) == ("t-60", "tipoff")

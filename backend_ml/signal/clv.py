@@ -11,6 +11,8 @@ else NO. Absent a book leg we default to YES (the report still measures raw
 price drift; side only sets the sign convention).
 """
 
+from backend_ml.signal.market_capture import ENTRY_MOMENT, CLOSING_MOMENT
+
 
 def clv_cents(entry_price_cents, closing_price_cents, side: str) -> float:
     delta = closing_price_cents - entry_price_cents
@@ -43,8 +45,8 @@ def clv_report(snapshots_by_game, fee_cents, min_samples: int) -> dict:
     """
     clvs, edges = [], []
     for _game, legs in snapshots_by_game.items():
-        entry = legs.get("t-60")
-        closing = legs.get("tipoff")
+        entry = legs.get(ENTRY_MOMENT)
+        closing = legs.get(CLOSING_MOMENT)
         if entry is None or closing is None:
             continue
         side = _side_for_game(entry)

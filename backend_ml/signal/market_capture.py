@@ -10,6 +10,12 @@ Snapshots are appended as JSONL. Path is gitignored.
 import json
 from pathlib import Path
 
+# Canonical capture moments. The live capture caller MUST pass these exact
+# values as `moment`; clv.clv_report pairs legs by them. Do not inline the
+# string literals elsewhere — a mismatch silently pairs zero legs.
+ENTRY_MOMENT = "t-60"
+CLOSING_MOMENT = "tipoff"
+
 
 def american_to_prob(odds: float) -> float:
     odds = float(odds)
