@@ -4,6 +4,7 @@
 #include <openssl/rsa.h>
 #include <openssl/bio.h>
 #include <openssl/buffer.h>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 namespace te {
@@ -26,21 +27,26 @@ KalshiSigner::KalshiSigner(std::string key_id, std::string pem) : key_id_(std::m
 }
 KalshiSigner::~KalshiSigner() { if (pkey_) EVP_PKEY_free((EVP_PKEY*)pkey_); }
 std::string KalshiSigner::sign(std::string_view msg) const {
-  EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+  std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> ctx(
+      EVP_MD_CTX_new(), EVP_MD_CTX_free);
+  if (!ctx) throw std::runtime_error("EVP_MD_CTX_new");
   EVP_PKEY_CTX* pctx = nullptr;
-  if (EVP_DigestSignInit(ctx, &pctx, EVP_sha256(), nullptr, (EVP_PKEY*)pkey_) <= 0)
+  if (EVP_DigestSignInit(ctx.get(), &pctx, EVP_sha256(), nullptr, (EVP_PKEY*)pkey_) <= 0)
     throw std::runtime_error("DigestSignInit");
-  EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING);
-  EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, RSA_PSS_SALTLEN_DIGEST); // == digest len (32)
-  EVP_PKEY_CTX_set_rsa_mgf1_md(pctx, EVP_sha256());
-  if (EVP_DigestSignUpdate(ctx, msg.data(), msg.size()) <= 0)
+  if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) <= 0)
+    throw std::runtime_error("set_rsa_padding");
+  if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, RSA_PSS_SALTLEN_DIGEST) <= 0) // == digest len (32)
+    throw std::runtime_error("set_rsa_pss_saltlen");
+  if (EVP_PKEY_CTX_set_rsa_mgf1_md(pctx, EVP_sha256()) <= 0)
+    throw std::runtime_error("set_rsa_mgf1_md");
+  if (EVP_DigestSignUpdate(ctx.get(), msg.data(), msg.size()) <= 0)
     throw std::runtime_error("DigestSignUpdate");
   size_t siglen = 0;
-  EVP_DigestSignFinal(ctx, nullptr, &siglen);
+  if (EVP_DigestSignFinal(ctx.get(), nullptr, &siglen) <= 0)
+    throw std::runtime_error("DigestSignFinal (size)");
   std::vector<unsigned char> sig(siglen);
-  if (EVP_DigestSignFinal(ctx, sig.data(), &siglen) <= 0)
+  if (EVP_DigestSignFinal(ctx.get(), sig.data(), &siglen) <= 0)
     throw std::runtime_error("DigestSignFinal");
-  EVP_MD_CTX_free(ctx);
   return b64(sig.data(), siglen);
 }
 }
