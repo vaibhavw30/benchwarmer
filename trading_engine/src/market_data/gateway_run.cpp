@@ -9,12 +9,14 @@
 #include "market_data/gateway.hpp"
 #include "market_data/kalshi_auth.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 #include <nlohmann/json.hpp>
 #include <openssl/err.h>
@@ -85,60 +87,86 @@ void MarketDataGateway::run(const std::vector<Ticker>& watchlist) {
   const std::string pem = read_file(env_or_throw("KALSHI_PRIVATE_KEY_PATH"));
   KalshiSigner signer(key_id, pem);
 
-  const long ts_ms = now_ms();
-  const std::string signature = signer.sign(ws_sign_message(ts_ms));
+  // Reconnect-with-backoff: on any connect/handshake/read exception, log it,
+  // sleep a backoff, and loop back to reconnect + resubscribe. A fresh
+  // connection gets a new orderbook_snapshot per ticker, which rebuilds
+  // `books_` from scratch, so no explicit book-clearing is needed here.
+  // Backoff starts at 1s, doubles up to a 30s cap, and resets to 1s after a
+  // connection that gets far enough to complete a clean subscribe.
+  const auto kInitialBackoff = std::chrono::seconds(1);
+  const auto kMaxBackoff = std::chrono::seconds(30);
+  auto backoff = kInitialBackoff;
 
-  net::io_context ioc;
-  ssl::context ctx(ssl::context::tlsv12_client);
-  ctx.set_default_verify_paths();
-  ctx.set_verify_mode(ssl::verify_peer);
-  // Verify the presented cert's identity actually matches kHost. verify_peer +
-  // default CA paths alone only prove the cert is CA-trusted for *some* domain;
-  // without this callback any valid cert for any host would pass (MITM gap).
-  ctx.set_verify_callback(ssl::host_name_verification(kHost));
-
-  tcp::resolver resolver(ioc);
-  websocket::stream<beast::ssl_stream<beast::tcp_stream>> ws(ioc, ctx);
-
-  auto const results = resolver.resolve(kHost, kPort);
-  beast::get_lowest_layer(ws).connect(results);
-
-  if (!SSL_set_tlsext_host_name(ws.next_layer().native_handle(), kHost))
-    throw beast::system_error(
-        beast::error_code(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category()));
-
-  ws.next_layer().handshake(ssl::stream_base::client);
-
-  ws.set_option(websocket::stream_base::decorator(
-      [&](websocket::request_type& req) {
-        req.set("KALSHI-ACCESS-KEY", key_id);
-        req.set("KALSHI-ACCESS-TIMESTAMP", std::to_string(ts_ms));
-        req.set("KALSHI-ACCESS-SIGNATURE", signature);
-      }));
-
-  ws.handshake(kHost, kTarget);
-
-  nlohmann::json sub;
-  sub["cmd"] = "subscribe";
-  nlohmann::json params;
-  params["channels"] = {"orderbook_delta"};
-  params["market_tickers"] = watchlist;
-  sub["params"] = params;
-  ws.write(net::buffer(sub.dump()));
-
-  beast::flat_buffer buffer;
   while (!stop_) {
     try {
-      buffer.clear();
-      ws.read(buffer);
-      if (!ws.got_text()) continue;
-      handle_raw(std::string_view(static_cast<const char*>(buffer.data().data()), buffer.size()));
+      const long ts_ms = now_ms();
+      const std::string signature = signer.sign(ws_sign_message(ts_ms));
+
+      net::io_context ioc;
+      ssl::context ctx(ssl::context::tlsv12_client);
+      ctx.set_default_verify_paths();
+      ctx.set_verify_mode(ssl::verify_peer);
+      // Verify the presented cert's identity actually matches kHost. verify_peer +
+      // default CA paths alone only prove the cert is CA-trusted for *some* domain;
+      // without this callback any valid cert for any host would pass (MITM gap).
+      ctx.set_verify_callback(ssl::host_name_verification(kHost));
+
+      tcp::resolver resolver(ioc);
+      websocket::stream<beast::ssl_stream<beast::tcp_stream>> ws(ioc, ctx);
+
+      auto const results = resolver.resolve(kHost, kPort);
+      beast::get_lowest_layer(ws).connect(results);
+
+      if (!SSL_set_tlsext_host_name(ws.next_layer().native_handle(), kHost))
+        throw beast::system_error(
+            beast::error_code(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category()));
+
+      ws.next_layer().handshake(ssl::stream_base::client);
+
+      ws.set_option(websocket::stream_base::decorator(
+          [&](websocket::request_type& req) {
+            req.set("KALSHI-ACCESS-KEY", key_id);
+            req.set("KALSHI-ACCESS-TIMESTAMP", std::to_string(ts_ms));
+            req.set("KALSHI-ACCESS-SIGNATURE", signature);
+          }));
+
+      ws.handshake(kHost, kTarget);
+
+      nlohmann::json sub;
+      sub["cmd"] = "subscribe";
+      nlohmann::json params;
+      params["channels"] = {"orderbook_delta"};
+      params["market_tickers"] = watchlist;
+      sub["params"] = params;
+      ws.write(net::buffer(sub.dump()));
+
+      // Reached a clean subscribe on this connection: reset backoff so a
+      // long-lived session isn't penalized by an earlier transient failure.
+      backoff = kInitialBackoff;
+
+      beast::flat_buffer buffer;
+      while (!stop_) {
+        buffer.clear();
+        ws.read(buffer);
+        if (!ws.got_text()) continue;
+        handle_raw(std::string_view(static_cast<const char*>(buffer.data().data()), buffer.size()));
+      }
+      // stop_ was set while the inner loop was running: exit cleanly without
+      // treating this as a failure that needs a backoff sleep.
+      return;
     } catch (const std::exception& e) {
-      // Beast's synchronous read() throws on any disconnect. Fail safe: log and
-      // break cleanly rather than letting the exception std::terminate the
-      // process on the first transient drop.
-      std::cerr << "[gateway] websocket read loop stopped: " << e.what() << '\n';
-      break;  // TODO(Task 20): reconnect-with-backoff + resubscribe
+      // Beast's synchronous read()/connect()/handshake() throws on any
+      // disconnect or connection failure. Fail safe: log and reconnect with
+      // backoff rather than letting the exception std::terminate the process
+      // or permanently giving up on the first transient drop.
+      std::cerr << "[gateway] websocket error, reconnecting in "
+                << std::chrono::duration_cast<std::chrono::seconds>(backoff).count()
+                << "s: " << e.what() << '\n';
+      if (stop_) return;
+      std::this_thread::sleep_for(backoff);
+      if (backoff < kMaxBackoff) {
+        backoff = std::min(backoff * 2, kMaxBackoff);
+      }
     }
   }
 }

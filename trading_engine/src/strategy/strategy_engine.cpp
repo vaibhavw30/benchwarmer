@@ -6,6 +6,12 @@
 namespace te {
 
 void StrategyEngine::on_book_update(const Ticker& t, const OrderBook& b, long now_ms) {
+  if (!kill_file_.empty()) risk_.poll_kill_file(kill_file_);
+  if (risk_.killed()) {
+    tel_.event("killed", {{"ticker", t}});
+    return;
+  }
+
   auto fv = fv_.fair_value(t);
   bool stale = fv_.is_stale(t, now_ms, c_.fair_value_max_age_secs);
   bool crossed = b.crossed();

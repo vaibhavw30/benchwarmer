@@ -1,4 +1,6 @@
 #pragma once
+#include <string>
+#include <utility>
 #include "core/config.hpp"
 #include "fair_value/fair_value.hpp"
 #include "risk/risk_manager.hpp"
@@ -17,6 +19,11 @@ class StrategyEngine {
                  PaperVenue& venue, Telemetry& tel)
       : c_(c), fv_(fv), risk_(risk), venue_(venue), tel_(tel) {}
 
+  // Non-constructor setter (additive): wires a kill-switch file path without
+  // touching the constructor signature main.cpp (Task 18) depends on. Empty
+  // by default, meaning "no kill file configured" -> polling is skipped.
+  void set_kill_file(std::string path) { kill_file_ = std::move(path); }
+
   void on_book_update(const Ticker& t, const OrderBook& b, long now_ms);
 
  private:
@@ -25,5 +32,6 @@ class StrategyEngine {
   RiskManager& risk_;
   PaperVenue& venue_;
   Telemetry& tel_;
+  std::string kill_file_;
 };
 }  // namespace te

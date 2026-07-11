@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include "strategy/strategy_engine.hpp"
@@ -36,4 +37,42 @@ TEST(StrategyEngine, TakesEdgeAndOpensPaperPosition) {
 
   EXPECT_GT(venue.position("T"), 0);
   EXPECT_NE(log.str().find("\"type\":\"take\""), std::string::npos);
+}
+
+TEST(StrategyEngine, KillFileHaltsTrading) {
+  Config c;
+  c.base_edge_cents = 2;
+  c.fee_cents_per_contract = 1;
+  c.confidence_k = 8.0;
+  c.max_order_size = 25;
+  c.max_contracts_per_market = 100;
+  c.max_aggregate_exposure_cents = 500000;
+  c.max_daily_loss_cents = 20000;
+  c.fair_value_max_age_secs = 1800;
+
+  FairValueProvider fv;
+  { std::ofstream f("se_fv_kill.json");
+    f << R"([{"ticker":"T","p_yes":0.62,"confidence":0.95,"asof":"2026-07-10T00:00:00Z"}])"; }
+  fv.load_from_file("se_fv_kill.json");
+
+  RiskManager risk(c);
+  PaperVenue venue;
+  std::ostringstream log;
+  Telemetry tel(log);
+  StrategyEngine eng(c, fv, risk, venue, tel);
+
+  const std::string kill_path = "KILL_STRATEGY_TEST";
+  { std::ofstream f(kill_path); f << "1"; }
+  eng.set_kill_file(kill_path);
+
+  OrderBook b;
+  b.apply_snapshot({{{40, 50}}, {{52, 50}}});  // yes_ask = 48; fair=62, thr=3 -> would normally take buy
+
+  const long now_ms = 1783641600000L + 60000L;
+  eng.on_book_update("T", b, now_ms);
+
+  EXPECT_EQ(venue.position("T"), 0);
+  EXPECT_NE(log.str().find("\"type\":\"killed\""), std::string::npos);
+
+  std::remove(kill_path.c_str());
 }

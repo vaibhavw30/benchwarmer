@@ -22,6 +22,7 @@ int main() {
     FairValueProvider fv; fv.load_from_file("fair_values.json");
     RiskManager risk(c); PaperVenue venue; Telemetry tel(std::cout);
     StrategyEngine eng(c, fv, risk, venue, tel);
+    eng.set_kill_file("KILL");  // touch ./KILL during a live run to halt trading (Task 20)
 
     // Started only after config loads, so a startup failure above lands in the
     // catch below without a thread to join. Sleep is chunked into 1s ticks so
@@ -47,7 +48,7 @@ int main() {
 
     MarketDataGateway gw;
     gw.on_update([&](const Ticker& t, const OrderBook& b){ eng.on_book_update(t, b, now_ms()); });
-    gw.run(map.watchlist());  // blocks until the WS read loop errors out; graceful SIGINT stop is deferred to Task 20
+    gw.run(map.watchlist());  // blocks, reconnecting with backoff on drops (Task 20); exits only via gw.stop() (no SIGINT handler wired yet)
 
     return 0;  // Joiner stops+joins the refresher as this scope exits
   } catch (const std::exception& e) {

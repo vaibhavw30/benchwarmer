@@ -1,4 +1,5 @@
 #pragma once
+#include <fstream>
 #include <string>
 #include <unordered_map>
 #include "core/config.hpp"
@@ -12,6 +13,13 @@ class RiskManager {
   void record_realized_pnl(int cents);
   void trip_kill_switch() { killed_ = true; }
   bool killed() const { return killed_; }
+  // Kill-switch file flag: if a file exists (openable) at `path`, trips the
+  // kill switch. Cheap to call every book-update tick; a missing path is a
+  // normal no-op (not an error) so operators can drop/remove the file live.
+  void poll_kill_file(const std::string& path) {
+    std::ifstream f(path);
+    if (f.good()) trip_kill_switch();
+  }
   RiskDecision check(const Order& o, bool fair_stale, bool book_crossed);
  private:
   const Config& c_;
