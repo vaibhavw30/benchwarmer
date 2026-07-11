@@ -1,0 +1,12 @@
+# trading_engine/.gitignore
+fair_values.json
+recordings/
+config/*secret*
+**/.env*
+build/
+
+# Untracked runtime artifacts written by the test suite (ctest binaries write
+# these into the working dir when run from trading_engine/).
+*_test.json
+*_fv.json
+se_fv*.json

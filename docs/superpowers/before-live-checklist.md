@@ -1,0 +1,46 @@
+# Before-Live Checklist — C++ Kalshi Trading Engine
+
+**Status:** v1 is **paper-only** and merge-ready. This checklist gates the path to trading real money (the plan's M5). Every item here is fine for paper and a **blocker for live**. Do not enable real order routing until all are addressed.
+
+Branch: `feat/cpp-kalshi-trading-engine`. Engine: `trading_engine/`. 33/33 C++ tests, 3/3 Python tests pass at merge.
+
+---
+
+## A. Live hardware-in-the-loop verification (needs your Kalshi credentials — could not be run in the build)
+
+These were built to compile+link but never run against the real API here:
+
+- [ ] **M1 — live market data.** Run `te_engine` with `KALSHI_KEY_ID` + `KALSHI_PRIVATE_KEY_PATH` and a populated `config/watchlist.json` (tonight's NBA tickers). Confirm the maintained order book for a ticker matches Kalshi's website. (`gateway_run.cpp`)
+- [ ] **M2 — fair values.** Run `python -m backend_ml.publish_fair_values` to emit `trading_engine/fair_values.json` from the real `predict_games()`; confirm tickers resolve and the engine loads them (no "skip: has_fv=false").
+- [ ] **M3 — paper session.** Run a full pre-game slate on `PaperVenue`; confirm via the Telemetry JSONL that books update, `skip`/`take`/`quote` fire sanely, and paper positions/P&L evolve reasonably. **Zero real orders** are placed in this mode.
+- [ ] **Reconnect drill.** Kill the network mid-session; confirm the reconnect-with-backoff loop re-subscribes and rebuilds books from the fresh snapshot. (`gateway_run.cpp`)
+- [ ] **Kill-switch drill.** `touch KILL` (from the engine's working dir) mid-session; confirm quoting halts within one update cycle and a `"killed"` event is logged. Note: `KILL` is a **CWD-relative** path today.
+
+## B. Risk-manager gaps (config fields exist but are NOT enforced in v1)
+
+- [ ] **Aggregate exposure cap.** `Config::max_aggregate_exposure_cents` is loaded but unused. Enforce a total `Σ |position| × price` cap in `RiskManager::check`.
+- [ ] **Rate-limit budget.** `Config::orders_per_sec_budget` is loaded but unused. Enforce an orders/sec budget before hitting Kalshi's real rate limits.
+- [ ] **Daily-loss kill vs settlement.** The daily-loss kill is now wired to `PaperVenue::realized_pnl_cents()` and trips correctly on realized round-trips (test: `DailyLossKillSwitchTripsFromRealizedPnl`). But pre-game positions realize P&L only on **settlement**, which the paper venue does not model — so for a buy-and-hold-to-settlement flow the kill won't see the loss until settlement. Add mark-to-market or settlement accounting before relying on it live.
+- [ ] **Position-flip cap.** `RiskManager::check` skips the per-market cap when an order flips the position to the opposite side (`cur` opposite to order direction). Unreachable under v1 config (`max_order_size` ≤ `max_contracts_per_market`) but must be closed if that invariant ever changes.
+
+## C. Arbitrage semantics (currently a directional bet, not a lock)
+
+- [ ] **Two-legged arb execution.** On an arb signal, `StrategyEngine` places only the **YES leg** (disclosed via a code comment and `"leg":"yes_only"` telemetry). `PaperVenue` models signed-YES only, so the NO leg of the lock is not executed — this is a **naked directional fill, not riskless arbitrage**. Implement a two-legged venue (YES + NO contracts) before treating arb as a lock.
+- [ ] **Dead `Sell` branch.** Under the OrderBook identity `yes_ask = 100 − no_bid`, `detect_arb`'s buy-both and sell-both conditions are algebraically identical and buy is checked first, so `Action::Sell` is unreachable. Remove it or rework the arb model when the two-legged venue lands.
+
+## D. Robustness / operability
+
+- [ ] **SIGINT handler.** No signal handler is wired; `gw.stop()` is never called, so Ctrl-C hard-kills the process rather than shutting down cleanly. Add a handler that calls `stop()`.
+- [ ] **Interruptible backoff.** `stop()` during the reconnect backoff sleep isn't observed for up to ~30s. Use an interruptible (condition-variable) sleep.
+- [ ] **Malformed-frame handling.** A single malformed WS frame throws out of `parse_ws_message` → unwinds to the gateway catch → full reconnect. Catch parse errors inside `handle_raw` and drop the frame, distinct from connection errors, to avoid a disconnect storm.
+- [ ] **Denied-order telemetry.** Risk-denied orders currently emit no event. Add a `"denied"` event for full decision-audit coverage.
+- [ ] **Config/watchlist paths.** `set_kill_file("KILL")`, `fair_values.json`, and `config/*` are resolved relative to CWD. Move to absolute/configured paths for a deployed run.
+
+## E. The live venue itself (M5 — explicitly out of v1 scope)
+
+- [ ] **`LiveKalshiVenue`.** Not built. Implement signed `POST /trade-api/v2/portfolio/orders` behind the existing `OrderVenue` interface, gated off by default.
+- [ ] **Go-live gate.** A separate spec/plan + explicit sign-off. Start with minimal size. Verify fee schedule is encoded correctly (`engine.json: fee_cents_per_contract`) against Kalshi's published fees — an unfee'd "edge" is not real.
+
+---
+
+**Bottom line:** v1 proves the pipeline end-to-end on paper with a real, tested fail-closed risk gate and kill switch. Section E + the money-relevant items in B/C are hard blockers before a single real cent.

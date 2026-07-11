@@ -1,0 +1,12 @@
+{
+  "max_contracts_per_market": 100,
+  "max_aggregate_exposure_cents": 500000,
+  "max_order_size": 25,
+  "max_daily_loss_cents": 20000,
+  "fee_cents_per_contract": 1,
+  "base_edge_cents": 2,
+  "confidence_k": 8.0,
+  "fair_value_refresh_secs": 60,
+  "fair_value_max_age_secs": 1800,
+  "orders_per_sec_budget": 5
+}
