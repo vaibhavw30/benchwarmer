@@ -58,12 +58,21 @@ def _cmd_evaluate(args):
         sys.path.append(_bml)
     from data_engine import build_training_dataset
     from backend_ml.signal_research import dataset as ds
+    import os
+    import pandas as pd
 
-    games = build_training_dataset()
-    xgb = joblib.load("backend_ml/xgboost_nba_model.pkl")
-    ridge = joblib.load("backend_ml/ridge_nba_model.pkl")
-    scaler = joblib.load("backend_ml/feature_scaler.pkl")
-    weights = json.loads(Path("backend_ml/ensemble_weights.json").read_text())
+    # Prefer the cached history (build_training_dataset re-scrapes nba_api on
+    # every call). Paths are anchored to the backend_ml/ dir so evaluate works
+    # regardless of the caller's cwd.
+    cache = os.path.join(_bml, "nba_training_cache.csv")
+    if os.path.exists(cache):
+        games = pd.read_csv(cache)
+    else:
+        games = build_training_dataset()
+    xgb = joblib.load(os.path.join(_bml, "xgboost_nba_model.pkl"))
+    ridge = joblib.load(os.path.join(_bml, "ridge_nba_model.pkl"))
+    scaler = joblib.load(os.path.join(_bml, "feature_scaler.pkl"))
+    weights = json.loads(Path(_bml, "ensemble_weights.json").read_text())
     df = ds.build_recompute_dataset(games, xgb, ridge, scaler, weights)
     out = run_evaluate(df, method=args.method)
     print(json.dumps(out, indent=2, default=str))
