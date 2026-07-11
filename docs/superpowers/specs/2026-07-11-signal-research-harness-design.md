@@ -47,7 +47,7 @@ real-money order routing. These are separate future specs.
 
 ## 3. Architecture
 
-Offline, Python-only. New package `backend_ml/signal/`, kept separate from the
+Offline, Python-only. New package `backend_ml/signal_research/`, kept separate from the
 model files (so we neither bloat `predict.py` nor touch the C++ hot path).
 Everything unifies around one tidy dataset schema:
 
@@ -196,7 +196,7 @@ are gitignored, and API calls need network/keys.
 
 ## 8. Deliverables
 
-1. `backend_ml/signal/` package (7 modules above) with unit tests.
+1. `backend_ml/signal_research/` package (7 modules above) with unit tests.
 2. `signal/artifacts/recalibrator.json` produced by the `evaluate` CLI.
 3. `market_snapshots` store populated by the `capture` CLI (forward).
 4. `publish_fair_values.py` recalibration flag (`RECALIBRATE=1`), off by default.

@@ -1,6 +1,6 @@
 import pytest
 
-from backend_ml.signal import clv
+from backend_ml.signal_research import clv
 
 
 def test_clv_yes_positive_when_price_rises():
@@ -58,5 +58,5 @@ def test_clv_report_empty_is_insufficient_not_crash():
 
 
 def test_moment_constants_match_stored_keys():
-    from backend_ml.signal.market_capture import ENTRY_MOMENT, CLOSING_MOMENT
+    from backend_ml.signal_research.market_capture import ENTRY_MOMENT, CLOSING_MOMENT
     assert (ENTRY_MOMENT, CLOSING_MOMENT) == ("t-60", "tipoff")

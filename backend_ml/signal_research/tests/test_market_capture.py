@@ -1,6 +1,6 @@
 import json
 import numpy as np
-from backend_ml.signal import market_capture as mc
+from backend_ml.signal_research import market_capture as mc
 
 
 def test_american_to_prob_even_and_favorite():

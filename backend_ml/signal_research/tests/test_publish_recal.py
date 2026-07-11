@@ -1,5 +1,5 @@
 from backend_ml.publish_fair_values import build_fair_values
-from backend_ml.signal.recalibration import Recalibrator
+from backend_ml.signal_research.recalibration import Recalibrator
 
 
 PRED = [{"home_team_id": 1, "away_team_id": 2, "date": "2026-01-01",

@@ -2,7 +2,7 @@ import ast
 import pathlib
 import numpy as np
 import pandas as pd
-from backend_ml.signal import dataset as ds
+from backend_ml.signal_research import dataset as ds
 
 
 class _FakeXGB:

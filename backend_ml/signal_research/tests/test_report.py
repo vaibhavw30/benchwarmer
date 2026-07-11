@@ -1,7 +1,7 @@
 import json
 import numpy as np
 import pandas as pd
-from backend_ml.signal import report, config
+from backend_ml.signal_research import report, config
 
 
 def test_load_fee_cents_reads_engine_json(tmp_path):

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from backend_ml.signal import recalibration as rc
-from backend_ml.signal import calibration as cal
+from backend_ml.signal_research import recalibration as rc
+from backend_ml.signal_research import calibration as cal
 
 
 def _miscalibrated(n=4000, seed=1):

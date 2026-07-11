@@ -8,14 +8,14 @@ import json
 import os
 from pathlib import Path
 
-from backend_ml.signal import calibration as cal
-from backend_ml.signal import recalibration as rc
-from backend_ml.signal import clv as clv_mod
-from backend_ml.signal import config
+from backend_ml.signal_research import calibration as cal
+from backend_ml.signal_research import recalibration as rc
+from backend_ml.signal_research import clv as clv_mod
+from backend_ml.signal_research import config
 
-ARTIFACT_PATH = "backend_ml/signal/artifacts/recalibrator.json"
+ARTIFACT_PATH = "backend_ml/signal_research/artifacts/recalibrator.json"
 SNAPSHOTS_PATH = os.getenv("MARKET_SNAPSHOTS_PATH",
-                           "backend_ml/signal/artifacts/market_snapshots.jsonl")
+                           "backend_ml/signal_research/artifacts/market_snapshots.jsonl")
 
 
 def run_evaluate(dataset_df, method="isotonic", artifact_path=ARTIFACT_PATH, min_n=200) -> dict:
@@ -50,14 +50,14 @@ def _cmd_evaluate(args):
     import joblib
     import sys
     # Append (not insert-0) the absolute backend_ml/ dir so data_engine's
-    # script-style imports resolve WITHOUT letting backend_ml/signal/ shadow
+    # script-style imports resolve WITHOUT letting backend_ml/signal_research/ shadow
     # the stdlib `signal` module for a downstream bare `import signal`
     # (joblib/sklearn/numpy). See before-live-checklist F.
     _bml = str(Path(__file__).resolve().parents[1])   # backend_ml/ dir
     if _bml not in sys.path:
         sys.path.append(_bml)
     from data_engine import build_training_dataset
-    from backend_ml.signal import dataset as ds
+    from backend_ml.signal_research import dataset as ds
 
     games = build_training_dataset()
     xgb = joblib.load("backend_ml/xgboost_nba_model.pkl")

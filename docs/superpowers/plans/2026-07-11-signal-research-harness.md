@@ -4,20 +4,20 @@
 
 **Goal:** Build an offline Python harness that measures the NBA ensemble's probability calibration, fits a recalibration map that feeds back into the fair values the C++ Kalshi engine trades on, and captures market prices forward to compute Closing Line Value (CLV) after fees.
 
-**Architecture:** New `backend_ml/signal/` package of seven deep modules unified around one labeled dataset schema `(game_id, date, home_team_id, away_team_id, p_model, [market_price], outcome)`. Pure metric/transform modules are fully unit-tested on synthetic data; I/O and API modules are tested with mocks. Recalibration wires into `publish_fair_values.py` behind a `RECALIBRATE=1` flag so raw vs. recalibrated is A/B-comparable.
+**Architecture:** New `backend_ml/signal_research/` package of seven deep modules unified around one labeled dataset schema `(game_id, date, home_team_id, away_team_id, p_model, [market_price], outcome)`. Pure metric/transform modules are fully unit-tested on synthetic data; I/O and API modules are tested with mocks. Recalibration wires into `publish_fair_values.py` behind a `RECALIBRATE=1` flag so raw vs. recalibrated is A/B-comparable.
 
 **Tech Stack:** Python 3, pandas, numpy, scikit-learn (IsotonicRegression / LogisticRegression), pytest. No new heavyweight deps. Reuses `backend_ml/data_engine.py`, `ensemble_weights.json`, the gitignored `.pkl` models, and `trading_engine/config/engine.json`.
 
 ## Global Constraints
 
-- **Package location:** all new code under `backend_ml/signal/`; tests under `backend_ml/signal/tests/`.
-- **No leakage:** the historical recompute path uses ONLY `data_engine.build_training_dataset()`'s as-of features. `backend_ml/signal/dataset.py` must NOT import or call `predict.predict_games` (it uses today's stats → future leak).
+- **Package location:** all new code under `backend_ml/signal_research/`; tests under `backend_ml/signal_research/tests/`.
+- **No leakage:** the historical recompute path uses ONLY `data_engine.build_training_dataset()`'s as-of features. `backend_ml/signal_research/dataset.py` must NOT import or call `predict.predict_games` (it uses today's stats → future leak).
 - **Ensemble math must match `backtest.py`:** `p_model = xgb_weight * p_xgb + ridge_weight * p_ridge`; weights from `ensemble_weights.json` (current: `xgb_weight=0.7`, `ridge_weight=0.3`), fallback `0.5/0.5`. Ridge probability is `1/(1+exp(-decision_function))`.
 - **Feature order (18, verbatim from `backtest.py`):** `ELO_H, ELO_A, REB_MISMATCH, TOV_MISMATCH, SHOOTING_GAP, EFG_PCT_EWMA_H, TOV_PCT_EWMA_H, ORB_PCT_EWMA_H, FT_RATE_EWMA_H, FATIGUE_SCORE_H, MOMENTUM_H, HOME_ALTITUDE, EFG_PCT_EWMA_A, TOV_PCT_EWMA_A, ORB_PCT_EWMA_A, FT_RATE_EWMA_A, FATIGUE_SCORE_A, MOMENTUM_A`.
 - **Fee is single-sourced:** read `fee_cents_per_contract` (currently `1`) from `trading_engine/config/engine.json`; never hard-code a second copy.
 - **Recalibration reported out-of-sample only:** train/test split; never report an in-sample Brier drop as the headline.
 - **CLV is forward-accruing:** zero on day one; refuse to summarize below a minimum captured-snapshot count.
-- **Secrets in env only:** `ODDS_API_KEY`, any Kalshi read key. `backend_ml/signal/artifacts/` and the market-snapshots file are gitignored.
+- **Secrets in env only:** `ODDS_API_KEY`, any Kalshi read key. `backend_ml/signal_research/artifacts/` and the market-snapshots file are gitignored.
 - **Run tests from the repo root** with `python -m pytest`. Model `.pkl` files and `.csv` caches are gitignored and MUST NOT appear in any test.
 
 ---
@@ -25,10 +25,10 @@
 ### Task 1: Calibration metrics (pure TDD core)
 
 **Files:**
-- Create: `backend_ml/signal/__init__.py`
-- Create: `backend_ml/signal/calibration.py`
-- Create: `backend_ml/signal/tests/__init__.py`
-- Test: `backend_ml/signal/tests/test_calibration.py`
+- Create: `backend_ml/signal_research/__init__.py`
+- Create: `backend_ml/signal_research/calibration.py`
+- Create: `backend_ml/signal_research/tests/__init__.py`
+- Test: `backend_ml/signal_research/tests/test_calibration.py`
 
 **Interfaces:**
 - Consumes: nothing (pure numpy).
@@ -42,10 +42,10 @@
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend_ml/signal/tests/test_calibration.py
+# backend_ml/signal_research/tests/test_calibration.py
 import numpy as np
 import pandas as pd
-from backend_ml.signal import calibration as cal
+from backend_ml.signal_research import calibration as cal
 
 
 def test_brier_half_p_half_win():
@@ -101,15 +101,15 @@ def test_calibration_report_keys():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest backend_ml/signal/tests/test_calibration.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal'`
+Run: `python -m pytest backend_ml/signal_research/tests/test_calibration.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal_research'`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create empty `backend_ml/signal/__init__.py` and `backend_ml/signal/tests/__init__.py`, then:
+Create empty `backend_ml/signal_research/__init__.py` and `backend_ml/signal_research/tests/__init__.py`, then:
 
 ```python
-# backend_ml/signal/calibration.py
+# backend_ml/signal_research/calibration.py
 """Pure calibration metrics on (predicted probability, binary outcome).
 
 No I/O, no model loading. Every function takes array-likes and returns a
@@ -182,13 +182,13 @@ def calibration_report(p, y, n_bins: int = 10) -> dict:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest backend_ml/signal/tests/test_calibration.py -v`
+Run: `python -m pytest backend_ml/signal_research/tests/test_calibration.py -v`
 Expected: PASS (7 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend_ml/signal/__init__.py backend_ml/signal/calibration.py backend_ml/signal/tests/
+git add backend_ml/signal_research/__init__.py backend_ml/signal_research/calibration.py backend_ml/signal_research/tests/
 git commit -m "feat(signal): pure calibration metrics (brier, log-loss, reliability, ece)"
 ```
 
@@ -197,8 +197,8 @@ git commit -m "feat(signal): pure calibration metrics (brier, log-loss, reliabil
 ### Task 2: Recalibration map (fit + out-of-sample eval + JSON artifact)
 
 **Files:**
-- Create: `backend_ml/signal/recalibration.py`
-- Test: `backend_ml/signal/tests/test_recalibration.py`
+- Create: `backend_ml/signal_research/recalibration.py`
+- Test: `backend_ml/signal_research/tests/test_recalibration.py`
 
 **Interfaces:**
 - Consumes: `calibration.brier_score`.
@@ -212,11 +212,11 @@ Isotonic is serialized as JSON-native `{"method":"isotonic","x":[...],"y":[...]}
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend_ml/signal/tests/test_recalibration.py
+# backend_ml/signal_research/tests/test_recalibration.py
 import numpy as np
 import pytest
-from backend_ml.signal import recalibration as rc
-from backend_ml.signal import calibration as cal
+from backend_ml.signal_research import recalibration as rc
+from backend_ml.signal_research import calibration as cal
 
 
 def _miscalibrated(n=4000, seed=1):
@@ -268,13 +268,13 @@ def test_unknown_method_raises():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest backend_ml/signal/tests/test_recalibration.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal.recalibration'`
+Run: `python -m pytest backend_ml/signal_research/tests/test_recalibration.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal_research.recalibration'`
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
-# backend_ml/signal/recalibration.py
+# backend_ml/signal_research/recalibration.py
 """Fit a monotone recalibration map and evaluate it out-of-sample.
 
 Isotonic (default) is stored JSON-native as knot points and applied with
@@ -288,7 +288,7 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 
-from backend_ml.signal.calibration import brier_score
+from backend_ml.signal_research.calibration import brier_score
 
 _EPS = 1e-6
 
@@ -372,13 +372,13 @@ def evaluate_recalibration(p, y, method="isotonic", test_size=0.3, seed=0) -> di
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest backend_ml/signal/tests/test_recalibration.py -v`
+Run: `python -m pytest backend_ml/signal_research/tests/test_recalibration.py -v`
 Expected: PASS (5 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend_ml/signal/recalibration.py backend_ml/signal/tests/test_recalibration.py
+git add backend_ml/signal_research/recalibration.py backend_ml/signal_research/tests/test_recalibration.py
 git commit -m "feat(signal): isotonic/platt recalibration with out-of-sample eval + JSON artifact"
 ```
 
@@ -387,8 +387,8 @@ git commit -m "feat(signal): isotonic/platt recalibration with out-of-sample eva
 ### Task 3: Labeled dataset builder (recompute + served, leakage-guarded)
 
 **Files:**
-- Create: `backend_ml/signal/dataset.py`
-- Test: `backend_ml/signal/tests/test_dataset.py`
+- Create: `backend_ml/signal_research/dataset.py`
+- Test: `backend_ml/signal_research/tests/test_dataset.py`
 
 **Interfaces:**
 - Consumes: `data_engine.build_training_dataset` (real, at runtime), joblib models (real, at runtime). Tests inject fakes.
@@ -403,12 +403,12 @@ git commit -m "feat(signal): isotonic/platt recalibration with out-of-sample eva
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend_ml/signal/tests/test_dataset.py
+# backend_ml/signal_research/tests/test_dataset.py
 import ast
 import pathlib
 import numpy as np
 import pandas as pd
-from backend_ml.signal import dataset as ds
+from backend_ml.signal_research import dataset as ds
 
 
 class _FakeXGB:
@@ -496,13 +496,13 @@ def test_no_leakage_predict_games_not_imported():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest backend_ml/signal/tests/test_dataset.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal.dataset'`
+Run: `python -m pytest backend_ml/signal_research/tests/test_dataset.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal_research.dataset'`
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
-# backend_ml/signal/dataset.py
+# backend_ml/signal_research/dataset.py
 """Assemble the labeled evaluation dataset: (p_model, outcome) per game.
 
 Two builders share one output schema:
@@ -575,13 +575,13 @@ def build_served_dataset(rows) -> pd.DataFrame:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest backend_ml/signal/tests/test_dataset.py -v`
+Run: `python -m pytest backend_ml/signal_research/tests/test_dataset.py -v`
 Expected: PASS (5 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend_ml/signal/dataset.py backend_ml/signal/tests/test_dataset.py
+git add backend_ml/signal_research/dataset.py backend_ml/signal_research/tests/test_dataset.py
 git commit -m "feat(signal): labeled dataset builders (recompute + served) with leakage guard"
 ```
 
@@ -590,8 +590,8 @@ git commit -m "feat(signal): labeled dataset builders (recompute + served) with 
 ### Task 4: De-vig + market snapshot capture (forward infra)
 
 **Files:**
-- Create: `backend_ml/signal/market_capture.py`
-- Test: `backend_ml/signal/tests/test_market_capture.py`
+- Create: `backend_ml/signal_research/market_capture.py`
+- Test: `backend_ml/signal_research/tests/test_market_capture.py`
 
 **Interfaces:**
 - Consumes: nothing pure; `fetch_two_way_odds` and `fetch_kalshi_price` are injected in tests, real at runtime.
@@ -607,10 +607,10 @@ git commit -m "feat(signal): labeled dataset builders (recompute + served) with 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend_ml/signal/tests/test_market_capture.py
+# backend_ml/signal_research/tests/test_market_capture.py
 import json
 import numpy as np
-from backend_ml.signal import market_capture as mc
+from backend_ml.signal_research import market_capture as mc
 
 
 def test_american_to_prob_even_and_favorite():
@@ -682,13 +682,13 @@ def test_capture_orchestrates_fetchers(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest backend_ml/signal/tests/test_market_capture.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal.market_capture'`
+Run: `python -m pytest backend_ml/signal_research/tests/test_market_capture.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal_research.market_capture'`
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
-# backend_ml/signal/market_capture.py
+# backend_ml/signal_research/market_capture.py
 """Forward market-price capture for CLV.
 
 Pure pieces (american_to_prob, devig, build_snapshot_rows) are fully tested.
@@ -760,13 +760,13 @@ def capture(watchlist, moment, asof, fetch_kalshi_price, fetch_two_way_odds, pat
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest backend_ml/signal/tests/test_market_capture.py -v`
+Run: `python -m pytest backend_ml/signal_research/tests/test_market_capture.py -v`
 Expected: PASS (7 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend_ml/signal/market_capture.py backend_ml/signal/tests/test_market_capture.py
+git add backend_ml/signal_research/market_capture.py backend_ml/signal_research/tests/test_market_capture.py
 git commit -m "feat(signal): de-vig + forward market snapshot capture (fetchers injected)"
 ```
 
@@ -775,8 +775,8 @@ git commit -m "feat(signal): de-vig + forward market snapshot capture (fetchers 
 ### Task 5: CLV + edge-vs-close (pure, fee-aware)
 
 **Files:**
-- Create: `backend_ml/signal/clv.py`
-- Test: `backend_ml/signal/tests/test_clv.py`
+- Create: `backend_ml/signal_research/clv.py`
+- Test: `backend_ml/signal_research/tests/test_clv.py`
 
 **Interfaces:**
 - Consumes: nothing pure.
@@ -788,8 +788,8 @@ git commit -m "feat(signal): de-vig + forward market snapshot capture (fetchers 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend_ml/signal/tests/test_clv.py
-from backend_ml.signal import clv
+# backend_ml/signal_research/tests/test_clv.py
+from backend_ml.signal_research import clv
 
 
 def test_clv_yes_positive_when_price_rises():
@@ -835,13 +835,13 @@ def test_clv_report_skips_games_missing_a_leg():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest backend_ml/signal/tests/test_clv.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal.clv'`
+Run: `python -m pytest backend_ml/signal_research/tests/test_clv.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal_research.clv'`
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
-# backend_ml/signal/clv.py
+# backend_ml/signal_research/clv.py
 """Closing Line Value and fee-aware edge-vs-close.
 
 Pure. Operates on captured snapshots. CLV pairs the t-60 (entry) and tipoff
@@ -903,13 +903,13 @@ def clv_report(snapshots_by_game, fee_cents, min_samples: int) -> dict:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest backend_ml/signal/tests/test_clv.py -v`
+Run: `python -m pytest backend_ml/signal_research/tests/test_clv.py -v`
 Expected: PASS (5 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend_ml/signal/clv.py backend_ml/signal/tests/test_clv.py
+git add backend_ml/signal_research/clv.py backend_ml/signal_research/tests/test_clv.py
 git commit -m "feat(signal): pure CLV + fee-aware edge-vs-close with min-sample gate"
 ```
 
@@ -918,9 +918,9 @@ git commit -m "feat(signal): pure CLV + fee-aware edge-vs-close with min-sample 
 ### Task 6: CLI entrypoints (evaluate / capture / clv_report)
 
 **Files:**
-- Create: `backend_ml/signal/report.py`
-- Create: `backend_ml/signal/config.py`
-- Test: `backend_ml/signal/tests/test_report.py`
+- Create: `backend_ml/signal_research/report.py`
+- Create: `backend_ml/signal_research/config.py`
+- Test: `backend_ml/signal_research/tests/test_report.py`
 
 **Interfaces:**
 - Consumes: all prior modules.
@@ -933,11 +933,11 @@ git commit -m "feat(signal): pure CLV + fee-aware edge-vs-close with min-sample 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend_ml/signal/tests/test_report.py
+# backend_ml/signal_research/tests/test_report.py
 import json
 import numpy as np
 import pandas as pd
-from backend_ml.signal import report, config
+from backend_ml.signal_research import report, config
 
 
 def test_load_fee_cents_reads_engine_json(tmp_path):
@@ -981,13 +981,13 @@ def test_load_snapshots_groups_by_game(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest backend_ml/signal/tests/test_report.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal.report'`
+Run: `python -m pytest backend_ml/signal_research/tests/test_report.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'backend_ml.signal_research.report'`
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
-# backend_ml/signal/config.py
+# backend_ml/signal_research/config.py
 """Single-source config reads for the signal harness."""
 import json
 from pathlib import Path
@@ -1004,7 +1004,7 @@ def load_fee_cents(engine_json_path=DEFAULT_ENGINE_JSON) -> int:
 ```
 
 ```python
-# backend_ml/signal/report.py
+# backend_ml/signal_research/report.py
 """CLI + orchestration for the signal harness.
 
 Testable functions (run_evaluate, load_snapshots) take plain data. Only main()
@@ -1015,14 +1015,14 @@ import json
 import os
 from pathlib import Path
 
-from backend_ml.signal import calibration as cal
-from backend_ml.signal import recalibration as rc
-from backend_ml.signal import clv as clv_mod
-from backend_ml.signal import config
+from backend_ml.signal_research import calibration as cal
+from backend_ml.signal_research import recalibration as rc
+from backend_ml.signal_research import clv as clv_mod
+from backend_ml.signal_research import config
 
-ARTIFACT_PATH = "backend_ml/signal/artifacts/recalibrator.json"
+ARTIFACT_PATH = "backend_ml/signal_research/artifacts/recalibrator.json"
 SNAPSHOTS_PATH = os.getenv("MARKET_SNAPSHOTS_PATH",
-                           "backend_ml/signal/artifacts/market_snapshots.jsonl")
+                           "backend_ml/signal_research/artifacts/market_snapshots.jsonl")
 
 
 def run_evaluate(dataset_df, method="isotonic", artifact_path=ARTIFACT_PATH, min_n=200) -> dict:
@@ -1058,7 +1058,7 @@ def _cmd_evaluate(args):
     import sys
     sys.path.insert(0, "backend_ml")            # data_engine script-style imports
     from data_engine import build_training_dataset
-    from backend_ml.signal import dataset as ds
+    from backend_ml.signal_research import dataset as ds
 
     games = build_training_dataset()
     xgb = joblib.load("backend_ml/xgboost_nba_model.pkl")
@@ -1108,13 +1108,13 @@ if __name__ == "__main__":
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest backend_ml/signal/tests/test_report.py -v`
+Run: `python -m pytest backend_ml/signal_research/tests/test_report.py -v`
 Expected: PASS (5 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend_ml/signal/report.py backend_ml/signal/config.py backend_ml/signal/tests/test_report.py
+git add backend_ml/signal_research/report.py backend_ml/signal_research/config.py backend_ml/signal_research/tests/test_report.py
 git commit -m "feat(signal): CLI (evaluate/capture/clv-report) with single-sourced fee"
 ```
 
@@ -1124,20 +1124,20 @@ git commit -m "feat(signal): CLI (evaluate/capture/clv-report) with single-sourc
 
 **Files:**
 - Modify: `backend_ml/publish_fair_values.py`
-- Test: `backend_ml/signal/tests/test_publish_recal.py`
+- Test: `backend_ml/signal_research/tests/test_publish_recal.py`
 
 **Interfaces:**
 - Consumes: `recalibration.Recalibrator`.
 - Produces: `build_fair_values(predictions, watchlist, recalibrator=None)` — when `recalibrator` is `None` the output is byte-identical to today; when provided, `p_yes` is recalibrated and `confidence` is recomputed as `max(p, 1-p)`.
 
-The `RECALIBRATE=1` env flag (read in `main()`) loads `backend_ml/signal/artifacts/recalibrator.json` and passes it in. Default (unset) preserves current behavior exactly.
+The `RECALIBRATE=1` env flag (read in `main()`) loads `backend_ml/signal_research/artifacts/recalibrator.json` and passes it in. Default (unset) preserves current behavior exactly.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend_ml/signal/tests/test_publish_recal.py
+# backend_ml/signal_research/tests/test_publish_recal.py
 from backend_ml.publish_fair_values import build_fair_values
-from backend_ml.signal.recalibration import Recalibrator
+from backend_ml.signal_research.recalibration import Recalibrator
 
 
 PRED = [{"home_team_id": 1, "away_team_id": 2, "date": "2026-01-01",
@@ -1169,7 +1169,7 @@ def test_recalibrated_confidence_uses_max_of_p_and_complement():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest backend_ml/signal/tests/test_publish_recal.py -v`
+Run: `python -m pytest backend_ml/signal_research/tests/test_publish_recal.py -v`
 Expected: FAIL — `TypeError: build_fair_values() got an unexpected keyword argument 'recalibrator'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1215,25 +1215,25 @@ Then in `main()`, after loading `watchlist` and before `build_fair_values(...)`:
 ```python
     recalibrator = None
     if os.getenv("RECALIBRATE") == "1":
-        from backend_ml.signal.recalibration import Recalibrator
-        recalibrator = Recalibrator.load("backend_ml/signal/artifacts/recalibrator.json")
+        from backend_ml.signal_research.recalibration import Recalibrator
+        recalibrator = Recalibrator.load("backend_ml/signal_research/artifacts/recalibrator.json")
     rows = build_fair_values(predictions, watchlist, recalibrator=recalibrator)
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest backend_ml/signal/tests/test_publish_recal.py -v`
+Run: `python -m pytest backend_ml/signal_research/tests/test_publish_recal.py -v`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Run the full signal suite to confirm no regressions**
 
-Run: `python -m pytest backend_ml/signal/ backend_ml/test_player_impact.py -v`
+Run: `python -m pytest backend_ml/signal_research/ backend_ml/test_player_impact.py -v`
 Expected: PASS (all tasks' tests green)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend_ml/publish_fair_values.py backend_ml/signal/tests/test_publish_recal.py
+git add backend_ml/publish_fair_values.py backend_ml/signal_research/tests/test_publish_recal.py
 git commit -m "feat(signal): wire recalibration into publish_fair_values behind RECALIBRATE flag"
 ```
 
@@ -1258,7 +1258,7 @@ signal/artifacts/
 
 Verify nothing tracked slipped in:
 
-Run: `git status --porcelain backend_ml/signal/artifacts/ 2>/dev/null; echo "ok"`
+Run: `git status --porcelain backend_ml/signal_research/artifacts/ 2>/dev/null; echo "ok"`
 Expected: no artifact files listed (only `ok`).
 
 - [ ] **Step 2: Add the harness's deferred live items to the checklist**
@@ -1297,7 +1297,7 @@ git commit -m "chore(signal): gitignore artifacts; add harness items to before-l
 
 ## Definition of Done
 
-- All 8 tasks' tests pass: `python -m pytest backend_ml/signal/ -v` (green).
+- All 8 tasks' tests pass: `python -m pytest backend_ml/signal_research/ -v` (green).
 - `backend_ml/test_player_impact.py` still passes (no regression).
 - `signal evaluate` produces a calibration + out-of-sample recalibration report and writes `recalibrator.json` (run locally with real models).
 - `RECALIBRATE` unset → `publish_fair_values` output unchanged; set → recalibrated `p_yes` + recomputed `confidence`.
