@@ -16,24 +16,42 @@ static long now_ms() {
   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 int main() {
-  Config c = Config::load("config/engine.json");
-  MarketMap map; map.load("config/watchlist.json");
-  FairValueProvider fv; fv.load_from_file("fair_values.json");
-  RiskManager risk(c); PaperVenue venue; Telemetry tel(std::cout);
-  StrategyEngine eng(c, fv, risk, venue, tel);
+  try {
+    Config c = Config::load("config/engine.json");
+    MarketMap map; map.load("config/watchlist.json");
+    FairValueProvider fv; fv.load_from_file("fair_values.json");
+    RiskManager risk(c); PaperVenue venue; Telemetry tel(std::cout);
+    StrategyEngine eng(c, fv, risk, venue, tel);
 
-  std::atomic<bool> running{true};
-  std::thread refresher([&]{
-    while (running) {
-      std::this_thread::sleep_for(std::chrono::seconds(c.fair_value_refresh_secs));
-      fv.load_from_file("fair_values.json");
-    }
-  });
+    // Started only after config loads, so a startup failure above lands in the
+    // catch below without a thread to join. Sleep is chunked into 1s ticks so
+    // shutdown (running=false) is observed promptly rather than after a full
+    // refresh interval.
+    std::atomic<bool> running{true};
+    std::thread refresher([&]{
+      while (running) {
+        for (int i = 0; i < c.fair_value_refresh_secs && running; ++i)
+          std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (running) fv.load_from_file("fair_values.json");
+      }
+    });
+    // RAII: guarantees the refresher is stopped and joined before `running`/`fv`/`c`
+    // (which it captures by reference) are destroyed — including on the exception
+    // path out of gw.run() below, where a still-joinable std::thread would
+    // otherwise call std::terminate during unwinding.
+    struct Joiner {
+      std::atomic<bool>& running;
+      std::thread& t;
+      ~Joiner() { running = false; if (t.joinable()) t.join(); }
+    } joiner{running, refresher};
 
-  MarketDataGateway gw;
-  gw.on_update([&](const Ticker& t, const OrderBook& b){ eng.on_book_update(t, b, now_ms()); });
-  gw.run(map.watchlist());  // blocks; Ctrl-C to stop
+    MarketDataGateway gw;
+    gw.on_update([&](const Ticker& t, const OrderBook& b){ eng.on_book_update(t, b, now_ms()); });
+    gw.run(map.watchlist());  // blocks until the WS read loop errors out; graceful SIGINT stop is deferred to Task 20
 
-  running = false; refresher.join();
-  return 0;
+    return 0;  // Joiner stops+joins the refresher as this scope exits
+  } catch (const std::exception& e) {
+    std::cerr << "fatal: " << e.what() << "\n";
+    return 1;
+  }
 }

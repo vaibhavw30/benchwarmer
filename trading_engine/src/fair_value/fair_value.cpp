@@ -25,12 +25,17 @@ void FairValueProvider::load_from_file(const std::string& path) {
   } catch (const std::exception&) {
     return;  // malformed/partial JSON: retain existing map, don't clobber
   }
+  // Parsing done above WITHOUT the lock; only the swap is guarded so concurrent
+  // readers (gw.run() loop) never observe a half-mutated map.
+  std::lock_guard<std::mutex> lk(mtx_);
   map_.swap(fresh);
 }
 std::optional<FairValue> FairValueProvider::fair_value(const Ticker& t) const {
+  std::lock_guard<std::mutex> lk(mtx_);
   auto it = map_.find(t); if (it == map_.end()) return std::nullopt; return it->second;
 }
 bool FairValueProvider::is_stale(const Ticker& t, long now_ms, int max_age_secs) const {
+  std::lock_guard<std::mutex> lk(mtx_);
   auto it = map_.find(t); if (it == map_.end()) return true;
   return (now_ms - it->second.asof_epoch_ms) > (long)max_age_secs * 1000L;
 }
