@@ -36,3 +36,9 @@ gtest_discover_tests(te_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_executable(te_engine src/main.cpp)
 target_link_libraries(te_engine PRIVATE te_lib)
 target_include_directories(te_engine PRIVATE src)
+
+# Offline paper-session driver: replay a fixture against PaperVenue with a
+# given fair_values.json (raw vs recalibrated). No network, no credentials.
+add_executable(paper_session tools/paper_session.cpp)
+target_link_libraries(paper_session PRIVATE te_lib)
+target_include_directories(paper_session PRIVATE src)
