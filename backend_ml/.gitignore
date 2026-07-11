@@ -48,6 +48,9 @@ htmlcov/
 logs/
 *.log
 
+# Signal-research harness artifacts (fitted maps, captured market snapshots)
+signal/artifacts/
+
 # OS
 .DS_Store
 Thumbs.db
