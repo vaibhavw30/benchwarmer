@@ -11,7 +11,7 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 
-from backend_ml.signal.calibration import brier_score
+from backend_ml.signal_research.calibration import brier_score
 
 _EPS = 1e-6
 

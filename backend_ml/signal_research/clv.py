@@ -11,7 +11,7 @@ else NO. Absent a book leg we default to YES (the report still measures raw
 price drift; side only sets the sign convention).
 """
 
-from backend_ml.signal.market_capture import ENTRY_MOMENT, CLOSING_MOMENT
+from backend_ml.signal_research.market_capture import ENTRY_MOMENT, CLOSING_MOMENT
 
 
 def clv_cents(entry_price_cents, closing_price_cents, side: str) -> float:

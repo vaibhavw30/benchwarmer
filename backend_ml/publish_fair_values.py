@@ -48,7 +48,7 @@ def build_fair_values(predictions, watchlist, recalibrator=None):
 def main():
     # Import predict lazily (heavy deps). Append (not insert-0) the backend_ml/
     # dir so predict.py's script-style imports (e.g. `from data_engine import
-    # ...`) resolve WITHOUT letting backend_ml/signal/ shadow the stdlib
+    # ...`) resolve WITHOUT letting backend_ml/signal_research/ shadow the stdlib
     # `signal` module for a downstream bare `import signal`. See
     # before-live-checklist F.
     import sys
@@ -65,8 +65,8 @@ def main():
         raise SystemExit("predict_games did not return a prediction list")
     recalibrator = None
     if os.getenv("RECALIBRATE") == "1":
-        from backend_ml.signal.recalibration import Recalibrator
-        recalibrator = Recalibrator.load("backend_ml/signal/artifacts/recalibrator.json")
+        from backend_ml.signal_research.recalibration import Recalibrator
+        recalibrator = Recalibrator.load("backend_ml/signal_research/artifacts/recalibrator.json")
     rows = build_fair_values(predictions, watchlist, recalibrator=recalibrator)
     Path(out_path).write_text(json.dumps(rows, indent=2))
     print(f"wrote {len(rows)} fair values -> {out_path}")

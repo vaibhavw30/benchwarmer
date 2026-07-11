@@ -8,14 +8,14 @@ import json
 import os
 from pathlib import Path
 
-from backend_ml.signal import calibration as cal
-from backend_ml.signal import recalibration as rc
-from backend_ml.signal import clv as clv_mod
-from backend_ml.signal import config
+from backend_ml.signal_research import calibration as cal
+from backend_ml.signal_research import recalibration as rc
+from backend_ml.signal_research import clv as clv_mod
+from backend_ml.signal_research import config
 
-ARTIFACT_PATH = "backend_ml/signal/artifacts/recalibrator.json"
+ARTIFACT_PATH = "backend_ml/signal_research/artifacts/recalibrator.json"
 SNAPSHOTS_PATH = os.getenv("MARKET_SNAPSHOTS_PATH",
-                           "backend_ml/signal/artifacts/market_snapshots.jsonl")
+                           "backend_ml/signal_research/artifacts/market_snapshots.jsonl")
 
 
 def run_evaluate(dataset_df, method="isotonic", artifact_path=ARTIFACT_PATH, min_n=200) -> dict:
@@ -50,20 +50,29 @@ def _cmd_evaluate(args):
     import joblib
     import sys
     # Append (not insert-0) the absolute backend_ml/ dir so data_engine's
-    # script-style imports resolve WITHOUT letting backend_ml/signal/ shadow
+    # script-style imports resolve WITHOUT letting backend_ml/signal_research/ shadow
     # the stdlib `signal` module for a downstream bare `import signal`
     # (joblib/sklearn/numpy). See before-live-checklist F.
     _bml = str(Path(__file__).resolve().parents[1])   # backend_ml/ dir
     if _bml not in sys.path:
         sys.path.append(_bml)
     from data_engine import build_training_dataset
-    from backend_ml.signal import dataset as ds
+    from backend_ml.signal_research import dataset as ds
+    import os
+    import pandas as pd
 
-    games = build_training_dataset()
-    xgb = joblib.load("backend_ml/xgboost_nba_model.pkl")
-    ridge = joblib.load("backend_ml/ridge_nba_model.pkl")
-    scaler = joblib.load("backend_ml/feature_scaler.pkl")
-    weights = json.loads(Path("backend_ml/ensemble_weights.json").read_text())
+    # Prefer the cached history (build_training_dataset re-scrapes nba_api on
+    # every call). Paths are anchored to the backend_ml/ dir so evaluate works
+    # regardless of the caller's cwd.
+    cache = os.path.join(_bml, "nba_training_cache.csv")
+    if os.path.exists(cache):
+        games = pd.read_csv(cache)
+    else:
+        games = build_training_dataset()
+    xgb = joblib.load(os.path.join(_bml, "xgboost_nba_model.pkl"))
+    ridge = joblib.load(os.path.join(_bml, "ridge_nba_model.pkl"))
+    scaler = joblib.load(os.path.join(_bml, "feature_scaler.pkl"))
+    weights = json.loads(Path(_bml, "ensemble_weights.json").read_text())
     df = ds.build_recompute_dataset(games, xgb, ridge, scaler, weights)
     out = run_evaluate(df, method=args.method)
     print(json.dumps(out, indent=2, default=str))

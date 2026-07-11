@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from backend_ml.signal import calibration as cal
+from backend_ml.signal_research import calibration as cal
 
 
 def test_brier_half_p_half_win():

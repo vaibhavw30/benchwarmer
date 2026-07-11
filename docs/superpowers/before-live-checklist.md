@@ -47,23 +47,23 @@ These were built to run on mocked fetchers; the live paths need network + keys:
 
 - [ ] **Live market capture.** Wire `fetch_kalshi_price(ticker)` (Kalshi REST GET
   mid/close, cents) and `fetch_two_way_odds(watchlist_row)` (two-way American
-  odds for de-vig) into `signal/report.py:_cmd_capture`. Run `capture` at T-60min
+  odds for de-vig) into `signal_research/report.py:_cmd_capture`. Run `capture` at T-60min
   and tip-off across a real slate; confirm rows land in the snapshots JSONL.
 - [ ] **CLV accrual.** CLV is zero until enough slates are captured. After N
-  captured slates, `signal clv-report` should stop reporting `insufficient` and
+  captured slates, `python -m backend_ml.signal_research.report clv-report` should stop reporting `insufficient` and
   produce mean CLV / edge-vs-close. Confirm the fee (`engine.json`) is applied.
   Note: the implemented edge metric is book-consensus-vs-Kalshi AT ENTRY (t-60),
   not model-vs-closing — the snapshot store carries no model p by design. Treat
   "edge-vs-close" in the report output accordingly, or extend the snapshot
   schema to carry p_model before relying on it.
-- [ ] **Recalibration go/no-go.** Run `signal evaluate`; only enable
+- [ ] **Recalibration go/no-go.** Run `python -m backend_ml.signal_research.report evaluate`; only enable
   `RECALIBRATE=1` in the publisher once the out-of-sample Brier delta is a
   genuine improvement AND the served-prediction cross-check agrees. An in-sample
   gain is not sufficient.
 - [ ] **Served cross-check volume.** `build_served_dataset` needs enough Supabase
   `game_predictions` with settled results to be meaningful; until then the
   recompute path stands alone.
-- [ ] **`signal` package shadows stdlib `signal` in the publisher.** `publish_fair_values.py:main()` does `sys.path.insert(0, <backend_ml dir>)` so `predict.py`'s script-style imports resolve. Now that `backend_ml/signal/` exists, any bare `import signal` by a downstream dependency (joblib, sklearn, numpy) after that insert would import THIS package instead of the stdlib module. Consequence: the `RECALIBRATE=1` flag-on path has never been exercised end-to-end. Before enabling `RECALIBRATE=1` live: run `python -m backend_ml.publish_fair_values` with `RECALIBRATE=1` and a real `recalibrator.json` on a working joblib environment, confirm no stdlib-`signal` shadow crash, or harden `main()`'s sys.path handling (append instead of insert-at-0, or scope the import). The same shadow hazard exists in `signal/report.py:_cmd_evaluate` (it also does `sys.path.insert(0, <backend_ml dir>)` then imports `data_engine`/`joblib`); since `signal evaluate` is what generates `recalibrator.json`, verify/harden that site too (append to sys.path instead of insert-at-0, or scope the import).
+- [x] **RESOLVED — stdlib `signal` shadow.** The harness package was originally named `backend_ml/signal/`, which shadowed the stdlib `signal` module (imported by `joblib` at import time) for any process with `backend_ml/` on `sys.path` ahead of the stdlib. Because the model scripts (`train_model.py`, `predict.py`, `backtest.py`) run from inside `backend_ml/` — Python auto-inserts the script dir at `sys.path[0]` — this broke `import joblib` in ALL of them, not just the harness. Fixed by **renaming the package to `backend_ml/signal_research/`** (no stdlib collision). Regression test `signal_research/tests/test_syspath_shadow.py` asserts that with `backend_ml/` at `sys.path[0]`, stdlib `signal` and `joblib` still import cleanly, guarding against re-introducing a stdlib-colliding package name.
 - [ ] **Capture-moment literals are load-bearing.** The live capture caller must pass exactly `market_capture.ENTRY_MOMENT` (`"t-60"`) and `market_capture.CLOSING_MOMENT` (`"tipoff"`) as the `moment` — `clv.clv_report` pairs legs by these. A mismatched string pairs zero legs and makes `clv-report` read `insufficient` forever with no error. Import the constants; never hand-type the strings.
 
 ---

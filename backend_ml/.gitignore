@@ -49,7 +49,7 @@ logs/
 *.log
 
 # Signal-research harness artifacts (fitted maps, captured market snapshots)
-signal/artifacts/
+signal_research/artifacts/
 
 # OS
 .DS_Store
