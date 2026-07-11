@@ -536,8 +536,8 @@ def predict_games(day_offset=0):
                         raise  # Re-raise if it's a different error
         except Exception as e:
             print(f"⚠️ Upload failed: {e}")
-    
-    return True
+
+    return preds
 
 if __name__ == "__main__":
     predict_games()
