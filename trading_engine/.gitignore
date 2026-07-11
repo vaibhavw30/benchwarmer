@@ -1,0 +1,6 @@
+# trading_engine/.gitignore
+fair_values.json
+recordings/
+config/*secret*
+**/.env*
+build/
