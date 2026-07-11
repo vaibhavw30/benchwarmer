@@ -41,6 +41,26 @@ These were built to compile+link but never run against the real API here:
 - [ ] **`LiveKalshiVenue`.** Not built. Implement signed `POST /trade-api/v2/portfolio/orders` behind the existing `OrderVenue` interface, gated off by default.
 - [ ] **Go-live gate.** A separate spec/plan + explicit sign-off. Start with minimal size. Verify fee schedule is encoded correctly (`engine.json: fee_cents_per_contract`) against Kalshi's published fees — an unfee'd "edge" is not real.
 
+## F. Signal-research harness (forward market capture — needs live creds)
+
+These were built to run on mocked fetchers; the live paths need network + keys:
+
+- [ ] **Live market capture.** Wire `fetch_kalshi_price(ticker)` (Kalshi REST GET
+  mid/close, cents) and `fetch_two_way_odds(watchlist_row)` (two-way American
+  odds for de-vig) into `signal/report.py:_cmd_capture`. Run `capture` at T-60min
+  and tip-off across a real slate; confirm rows land in the snapshots JSONL.
+- [ ] **CLV accrual.** CLV is zero until enough slates are captured. After N
+  captured slates, `signal clv-report` should stop reporting `insufficient` and
+  produce mean CLV / edge-vs-close. Confirm the fee (`engine.json`) is applied.
+- [ ] **Recalibration go/no-go.** Run `signal evaluate`; only enable
+  `RECALIBRATE=1` in the publisher once the out-of-sample Brier delta is a
+  genuine improvement AND the served-prediction cross-check agrees. An in-sample
+  gain is not sufficient.
+- [ ] **Served cross-check volume.** `build_served_dataset` needs enough Supabase
+  `game_predictions` with settled results to be meaningful; until then the
+  recompute path stands alone.
+- [ ] **`signal` package shadows stdlib `signal` in the publisher.** `publish_fair_values.py:main()` does `sys.path.insert(0, <backend_ml dir>)` so `predict.py`'s script-style imports resolve. Now that `backend_ml/signal/` exists, any bare `import signal` by a downstream dependency (joblib, sklearn, numpy) after that insert would import THIS package instead of the stdlib module. Consequence: the `RECALIBRATE=1` flag-on path has never been exercised end-to-end. Before enabling `RECALIBRATE=1` live: run `python -m backend_ml.publish_fair_values` with `RECALIBRATE=1` and a real `recalibrator.json` on a working joblib environment, confirm no stdlib-`signal` shadow crash, or harden `main()`'s sys.path handling (append instead of insert-at-0, or scope the import).
+
 ---
 
 **Bottom line:** v1 proves the pipeline end-to-end on paper with a real, tested fail-closed risk gate and kill switch. Section E + the money-relevant items in B/C are hard blockers before a single real cent.
