@@ -9,11 +9,15 @@ import os
 from pathlib import Path
 
 
-def build_fair_values(predictions, watchlist):
+def build_fair_values(predictions, watchlist, recalibrator=None):
     """Pure mapping: (model predictions, ticker watchlist) -> fair-value rows.
 
     Joins on (home_team_id, away_team_id, game_date). Unmapped games are
     skipped (fail-closed): a wrong ticker means trading the wrong game.
+
+    When `recalibrator` is provided, p_yes is passed through the recalibration
+    map and confidence is recomputed as max(p, 1-p). When None, behavior is
+    byte-identical to the pre-recalibration publisher.
     """
     index = {(w["home_team_id"], w["away_team_id"], w["game_date"]): w["ticker"]
              for w in watchlist}
@@ -23,13 +27,18 @@ def build_fair_values(predictions, watchlist):
         ticker = index.get(key)
         if ticker is None:
             continue
+        # Clamp to [0,1] at the boundary: a bad/out-of-range model value
+        # here must not propagate into edge_threshold_cents (which can go
+        # <= 0 for confidence outside [0,1]) or into a nonsensical price.
+        p_yes = max(0.0, min(1.0, float(p["home_win_probability"])))
+        confidence = max(0.0, min(1.0, float(p["confidence_score"])))
+        if recalibrator is not None:
+            p_yes = float(recalibrator.transform([p_yes])[0])
+            confidence = max(p_yes, 1.0 - p_yes)
         rows.append({
             "ticker": ticker,
-            # Clamp to [0,1] at the boundary: a bad/out-of-range model value
-            # here must not propagate into edge_threshold_cents (which can go
-            # <= 0 for confidence outside [0,1]) or into a nonsensical price.
-            "p_yes": max(0.0, min(1.0, float(p["home_win_probability"]))),   # YES = home wins
-            "confidence": max(0.0, min(1.0, float(p["confidence_score"]))),
+            "p_yes": p_yes,               # YES = home wins
+            "confidence": confidence,
             "asof": datetime.datetime.utcnow().isoformat() + "Z",
             "game_id": p["game_id"],
         })
@@ -50,7 +59,11 @@ def main():
     predictions = predict_games(day_offset=0)   # existing model entrypoint
     if not isinstance(predictions, list):
         raise SystemExit("predict_games did not return a prediction list")
-    rows = build_fair_values(predictions, watchlist)
+    recalibrator = None
+    if os.getenv("RECALIBRATE") == "1":
+        from backend_ml.signal.recalibration import Recalibrator
+        recalibrator = Recalibrator.load("backend_ml/signal/artifacts/recalibrator.json")
+    rows = build_fair_values(predictions, watchlist, recalibrator=recalibrator)
     Path(out_path).write_text(json.dumps(rows, indent=2))
     print(f"wrote {len(rows)} fair values -> {out_path}")
 
