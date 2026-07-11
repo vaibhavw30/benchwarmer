@@ -34,6 +34,13 @@ def _side_for_game(entry) -> str:
 
 
 def clv_report(snapshots_by_game, fee_cents, min_samples: int) -> dict:
+    """Pair t-60 (entry) and tipoff (closing) legs per game and summarize.
+
+    Edge is computed at ENTRY (t-60) between the de-vigged book consensus
+    (book_p) and the Kalshi price (kalshi_p) -- it is book-vs-Kalshi at entry,
+    NOT model-vs-closing. mean_edge_cents is None when no paired game carries a
+    book_p leg.
+    """
     clvs, edges = [], []
     for _game, legs in snapshots_by_game.items():
         entry = legs.get("t-60")
@@ -46,7 +53,7 @@ def clv_report(snapshots_by_game, fee_cents, min_samples: int) -> dict:
         if entry.get("book_p") is not None:
             edges.append(edge_vs_close_cents(entry["book_p"], entry["kalshi_p"], fee_cents))
     n = len(clvs)
-    if n < min_samples:
+    if n < min_samples or n == 0:
         return {"n": n, "insufficient": True,
                 "mean_clv_cents": None, "mean_edge_cents": None}
     return {

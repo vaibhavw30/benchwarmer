@@ -1,9 +1,16 @@
+import pytest
+
 from backend_ml.signal import clv
 
 
 def test_clv_yes_positive_when_price_rises():
     assert clv.clv_cents(40, 46, "YES") == 6
     assert clv.clv_cents(40, 46, "NO") == -6
+
+
+def test_clv_cents_invalid_side_raises():
+    with pytest.raises(ValueError):
+        clv.clv_cents(40, 46, "MAYBE")
 
 
 def test_edge_after_fee_can_flip_negative():
@@ -31,6 +38,7 @@ def test_clv_report_computes_means_when_enough():
     assert rep["insufficient"] is False
     assert rep["n"] == 5
     assert abs(rep["mean_clv_cents"] - 6.0) < 1e-9   # YES side, 40 -> 46
+    assert abs(rep["mean_edge_cents"] - 9.0) < 1e-9  # abs(0.50-0.40)*100 - 1 fee
 
 
 def test_clv_report_skips_games_missing_a_leg():
@@ -40,3 +48,10 @@ def test_clv_report_skips_games_missing_a_leg():
     }
     rep = clv.clv_report(snaps, fee_cents=1, min_samples=1)
     assert rep["n"] == 1
+
+
+def test_clv_report_empty_is_insufficient_not_crash():
+    rep = clv.clv_report({}, fee_cents=1, min_samples=0)
+    assert rep["n"] == 0
+    assert rep["insufficient"] is True
+    assert rep["mean_clv_cents"] is None
