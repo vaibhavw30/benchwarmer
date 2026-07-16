@@ -13,6 +13,7 @@ python-dotenv>=1.0.0
 
 # Data Fetching
 requests>=2.31.0
+cryptography>=42.0.0  # RSA-PSS signing for Kalshi REST auth (signal_research/kalshi_auth.py)
 nba_api>=1.1.11  # Official NBA API wrapper
 beautifulsoup4>=4.12.0  # If scraping is needed
 lxml>=4.9.0  # HTML/XML parser for pandas read_html
