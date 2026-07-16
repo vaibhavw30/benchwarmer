@@ -78,8 +78,11 @@ cheaply, and does it beat the market after fees?*
 - **`market_capture.py`** — forward snapshotter: Kalshi mid + de-vigged book
   consensus → `market_snapshots.jsonl`.
 - **`clv.py`** — Closing Line Value (Kalshi price drift + book-vs-Kalshi edge).
+- **`model_clv.py`** — model-vs-market suite: model CLV, model-beats-close (Brier
+  vs the closing line), fee-aware entry edge, in raw-sign + would-trade buckets;
+  edge threshold is bit-for-bit parity with the C++ engine.
 - **`plots.py`** — reliability diagram (`evaluate --plot`).
-- **`report.py`** — CLI: `evaluate`, `capture`, `clv-report`.
+- **`report.py`** — CLI: `evaluate`, `capture`, `clv-report`, `model-clv-report`.
 - **`publish_fair_values.py`** (in `backend_ml/`) — joins predictions to the Kalshi
   watchlist and, behind **`RECALIBRATE=1`**, applies the recalibration map so the
   engine trades on corrected probabilities (byte-identical when off).
@@ -127,7 +130,7 @@ References: [design spec](superpowers/specs/2026-07-10-cpp-kalshi-arb-engine-des
 | Signal research harness (calibration, recalibration, forward CLV) | ✅ Built, merged · 42 Python tests |
 | `RECALIBRATE=1` wiring + reliability plot | ✅ Built · verified on real models |
 | Offline paper demo (`paper_session`, `run_paper.sh`) | ✅ Built |
-| Model-vs-close CLV (model beats the closing line) | 📋 **Spec + plan only, not implemented** |
+| Model-vs-close CLV (model beats the closing line) | ✅ Built, merged · 62 Python tests · edge-formula parity with the C++ engine. Accrues signal once live snapshots carry `p_model` + `settlements.json` is populated (creds/in-season). |
 | Live market data / live paper session (M1/M3) | ⏳ Deferred — needs Kalshi creds + in-season slate |
 | Live order routing (`LiveKalshiVenue`, M5) | ⛔ Not built — hard-gated before real money |
 
