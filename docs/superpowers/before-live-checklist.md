@@ -72,6 +72,14 @@ These were built to run on mocked fetchers; the live paths need network + keys:
   `model-clv-report` runs with an empty settlement map: model CLV and entry edge
   accrue, but the `beats_close` block stays `null`. Pass `--signal-version
   raw|recalibrated` matching how `fair_values.json` was published at capture time.
+- [ ] **`would_trade` proxy + settlement-key caveats.** `would_trade` in
+  `model-clv-report` is a mid-price/continuous-fair proxy that over-counts trades
+  vs the engine's `detect_take` (integer fair + executable ask/bid); read it as
+  an upper bound, not the deployed strategy's exact CLV. Separately,
+  `settlements.json` is a flat `{ticker: 0|1}` joined to snapshots by ticker; it
+  must be keyed by the exact per-slate Kalshi ticker (NBA per-game tickers are
+  date-specific). If a ticker string ever recurs across dates, the wrong outcome
+  attaches silently — key by game_id instead if that assumption ever breaks.
 
 ---
 

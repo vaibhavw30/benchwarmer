@@ -54,11 +54,16 @@ def load_settlements(path=SETTLEMENTS_PATH) -> dict:
     Populated live by the deferred Kalshi settlement fetch (see
     before-live-checklist). The file format is a JSON object {ticker: 0|1}.
     """
-    from pathlib import Path
     p = Path(path)
     if not p.exists():
         return {}
-    return {k: int(v) for k, v in json.loads(p.read_text()).items()}
+    out = {}
+    for k, v in json.loads(p.read_text()).items():
+        outcome = int(v)
+        if outcome not in (0, 1):
+            raise ValueError(f"settlement outcome must be 0 or 1: {k!r}={v!r}")
+        out[k] = outcome
+    return out
 
 
 def _cmd_evaluate(args):

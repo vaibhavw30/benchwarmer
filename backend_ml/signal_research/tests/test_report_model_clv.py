@@ -1,4 +1,5 @@
 import json
+import pytest
 from backend_ml.signal_research import report, config
 from backend_ml.signal_research import model_clv
 from backend_ml.signal_research.market_capture import ENTRY_MOMENT, CLOSING_MOMENT
@@ -9,6 +10,13 @@ def test_load_settlements_reads_and_defaults(tmp_path):
     p.write_text('{"T1": 1, "T2": 0}')
     assert report.load_settlements(p) == {"T1": 1, "T2": 0}
     assert report.load_settlements(tmp_path / "nope.json") == {}
+
+
+def test_load_settlements_rejects_invalid_outcome(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text('{"T1": 2}')
+    with pytest.raises(ValueError):
+        report.load_settlements(p)
 
 
 def test_model_clv_report_wiring_end_to_end():

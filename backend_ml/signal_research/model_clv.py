@@ -29,6 +29,15 @@ def entry_edge_cents(p_model, kalshi_entry_p, fee_cents) -> float:
 
 
 def would_trade(p_model, kalshi_entry_p, base_edge_cents, fee_cents, confidence_k) -> bool:
+    """Mid-price, continuous-fair approximation of the engine's trade decision.
+
+    The live engine's detect_take (trading_engine/src/strategy/edge_taker.cpp)
+    compares an integer fair = clamp(lround(100*p_yes), 1, 99) against the
+    executable top-of-book (buy iff best_yes_ask <= fair - threshold), whereas
+    this compares one continuous kalshi_entry_p to fair. As a result the
+    would_trade bucket is an upper bound: it over-includes marginal games
+    relative to what the engine would actually trade.
+    """
     confidence = max(p_model, 1.0 - p_model)
     threshold = edge_threshold_cents(confidence, base_edge_cents, fee_cents, confidence_k)
     divergence_cents = abs(p_model - kalshi_entry_p) * 100.0
