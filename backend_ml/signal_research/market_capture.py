@@ -31,7 +31,18 @@ def devig(home_american: float, away_american: float):
     return ph / total, pa / total
 
 
-def build_snapshot_rows(watchlist, moment, kalshi_prices, book_odds, asof):
+def load_fair_values(path):
+    """Map ticker -> published p_yes from a fair_values.json list. {} if absent."""
+    p = Path(path)
+    if not p.exists():
+        return {}
+    rows = json.loads(p.read_text())
+    return {r["ticker"]: float(r["p_yes"]) for r in rows}
+
+
+def build_snapshot_rows(watchlist, moment, kalshi_prices, book_odds, asof,
+                        fair_values=None):
+    fair_values = fair_values or {}
     rows = []
     for w in watchlist:
         ticker = w["ticker"]
@@ -46,6 +57,7 @@ def build_snapshot_rows(watchlist, moment, kalshi_prices, book_odds, asof):
             "moment": moment,
             "kalshi_p": float(cents) / 100.0,
             "book_p": book_p,
+            "p_model": fair_values.get(ticker),   # None if ticker absent
             "asof": asof,
         })
     return rows
@@ -59,7 +71,8 @@ def append_snapshots(rows, path):
             f.write(json.dumps(r) + "\n")
 
 
-def capture(watchlist, moment, asof, fetch_kalshi_price, fetch_two_way_odds, path):
+def capture(watchlist, moment, asof, fetch_kalshi_price, fetch_two_way_odds, path,
+            fair_values=None):
     kalshi_prices, book_odds = {}, {}
     for w in watchlist:
         ticker = w["ticker"]
@@ -68,6 +81,7 @@ def capture(watchlist, moment, asof, fetch_kalshi_price, fetch_two_way_odds, pat
             book_odds[ticker] = fetch_two_way_odds(w)
         except Exception:
             continue                      # skip this ticker, keep the rest
-    rows = build_snapshot_rows(watchlist, moment, kalshi_prices, book_odds, asof)
+    rows = build_snapshot_rows(watchlist, moment, kalshi_prices, book_odds, asof,
+                               fair_values)
     append_snapshots(rows, path)
     return len(rows)

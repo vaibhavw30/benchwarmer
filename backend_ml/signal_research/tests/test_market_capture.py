@@ -68,3 +68,36 @@ def test_capture_orchestrates_fetchers(tmp_path):
     row = json.loads(path.read_text().strip())
     assert abs(row["kalshi_p"] - 0.60) < 1e-9
     assert 0 < row["book_p"] < 1
+
+
+def test_load_fair_values_maps_ticker_to_p_yes(tmp_path):
+    from backend_ml.signal_research import market_capture as mc
+    fv = tmp_path / "fv.json"
+    fv.write_text('[{"ticker":"T1","p_yes":0.62,"confidence":0.62},'
+                  ' {"ticker":"T2","p_yes":0.4,"confidence":0.6}]')
+    assert mc.load_fair_values(fv) == {"T1": 0.62, "T2": 0.4}
+
+
+def test_load_fair_values_missing_file_is_empty(tmp_path):
+    from backend_ml.signal_research import market_capture as mc
+    assert mc.load_fair_values(tmp_path / "nope.json") == {}
+
+
+def test_build_snapshot_rows_stamps_p_model():
+    from backend_ml.signal_research import market_capture as mc
+    wl = [{"ticker": "T1", "game_id": "g1", "home_team_id": 1, "away_team_id": 2,
+           "game_date": "2026-01-01"}]
+    rows = mc.build_snapshot_rows(wl, "t-60", {"T1": 55}, {"T1": (-110, -110)},
+                                  "2026-01-01T00:00:00Z", fair_values={"T1": 0.62})
+    assert rows[0]["p_model"] == 0.62
+
+
+def test_build_snapshot_rows_p_model_none_when_ticker_absent():
+    from backend_ml.signal_research import market_capture as mc
+    wl = [{"ticker": "T1", "game_id": "g1", "home_team_id": 1, "away_team_id": 2,
+           "game_date": "2026-01-01"}]
+    # no fair_values passed -> p_model None, existing behavior otherwise intact
+    rows = mc.build_snapshot_rows(wl, "t-60", {"T1": 55}, {"T1": (-110, -110)},
+                                  "2026-01-01T00:00:00Z")
+    assert rows[0]["p_model"] is None
+    assert rows[0]["kalshi_p"] == 0.55        # unchanged
