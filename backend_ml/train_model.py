@@ -1,5 +1,6 @@
 import pandas as pd
 import joblib
+import os
 import sys
 import json
 import numpy as np
@@ -14,7 +15,15 @@ RIDGE_MODEL_PATH = "ridge_nba_model.pkl"
 SCALER_PATH = "feature_scaler.pkl"
 ENSEMBLE_WEIGHTS_PATH = "ensemble_weights.json"
 
-def train_and_optimize_model():
+def save_artifacts(xgb_model, ridge_model, scaler, weights_config, output_dir="."):
+    """Write the 4 model artifacts to output_dir (default: cwd, as always)."""
+    joblib.dump(xgb_model, os.path.join(output_dir, MODEL_PATH))
+    joblib.dump(ridge_model, os.path.join(output_dir, RIDGE_MODEL_PATH))
+    joblib.dump(scaler, os.path.join(output_dir, SCALER_PATH))
+    with open(os.path.join(output_dir, ENSEMBLE_WEIGHTS_PATH), 'w') as f:
+        json.dump(weights_config, f, indent=2)
+
+def train_and_optimize_model(output_dir="."):
     try:
         from data_engine import load_or_build_training_dataset
     except ImportError as e:
@@ -232,19 +241,13 @@ def train_and_optimize_model():
         print(f"   {row['Feature']:25} XGB:{row['XGB_Importance']:.4f}  Ridge:{row['Ridge_Coef']:.4f}")
 
     # 6. SAVE ALL MODELS
-    joblib.dump(best_model, MODEL_PATH)
-    joblib.dump(ridge, RIDGE_MODEL_PATH)
-    joblib.dump(scaler, SCALER_PATH)
-
-    # Save optimal weights
     weights_config = {
         "xgb_weight": xgb_w,
         "ridge_weight": ridge_w,
         "test_accuracy": float(best_ensemble_acc),
         "train_date": str(pd.Timestamp.now())
     }
-    with open(ENSEMBLE_WEIGHTS_PATH, 'w') as f:
-        json.dump(weights_config, f, indent=2)
+    save_artifacts(best_model, ridge, scaler, weights_config, output_dir)
 
     print(f"\n💾 Models Saved:")
     print(f"   XGBoost:  {MODEL_PATH}")
