@@ -65,6 +65,21 @@ These were built to run on mocked fetchers; the live paths need network + keys:
   recompute path stands alone.
 - [x] **RESOLVED — stdlib `signal` shadow.** The harness package was originally named `backend_ml/signal/`, which shadowed the stdlib `signal` module (imported by `joblib` at import time) for any process with `backend_ml/` on `sys.path` ahead of the stdlib. Because the model scripts (`train_model.py`, `predict.py`, `backtest.py`) run from inside `backend_ml/` — Python auto-inserts the script dir at `sys.path[0]` — this broke `import joblib` in ALL of them, not just the harness. Fixed by **renaming the package to `backend_ml/signal_research/`** (no stdlib collision). Regression test `signal_research/tests/test_syspath_shadow.py` asserts that with `backend_ml/` at `sys.path[0]`, stdlib `signal` and `joblib` still import cleanly, guarding against re-introducing a stdlib-colliding package name.
 - [ ] **Capture-moment literals are load-bearing.** The live capture caller must pass exactly `market_capture.ENTRY_MOMENT` (`"t-60"`) and `market_capture.CLOSING_MOMENT` (`"tipoff"`) as the `moment` — `clv.clv_report` pairs legs by these. A mismatched string pairs zero legs and makes `clv-report` read `insufficient` forever with no error. Import the constants; never hand-type the strings.
+- [ ] **Live Kalshi settlement for model-CLV.** `signal_research/report.py:load_settlements`
+  reads a `{ticker: 0|1}` file that a deferred live step must populate: after a
+  slate settles, query each ticker's Kalshi resolution (YES=home-win -> 1, else 0)
+  and write `signal_research/artifacts/settlements.json`. Until then,
+  `model-clv-report` runs with an empty settlement map: model CLV and entry edge
+  accrue, but the `beats_close` block stays `null`. Pass `--signal-version
+  raw|recalibrated` matching how `fair_values.json` was published at capture time.
+- [ ] **`would_trade` proxy + settlement-key caveats.** `would_trade` in
+  `model-clv-report` is a mid-price/continuous-fair proxy that over-counts trades
+  vs the engine's `detect_take` (integer fair + executable ask/bid); read it as
+  an upper bound, not the deployed strategy's exact CLV. Separately,
+  `settlements.json` is a flat `{ticker: 0|1}` joined to snapshots by ticker; it
+  must be keyed by the exact per-slate Kalshi ticker (NBA per-game tickers are
+  date-specific). If a ticker string ever recurs across dates, the wrong outcome
+  attaches silently — key by game_id instead if that assumption ever breaks.
 
 ---
 
