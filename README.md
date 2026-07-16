@@ -2,6 +2,8 @@
 
 An AI-powered platform that predicts NBA game outcomes using machine learning (XGBoost) and provides real-time predictions through a modern web interface.
 
+> **📖 Start here: [Project Overview](docs/PROJECT-OVERVIEW.md)** — the full map of how the pieces fit: the NBA prediction model, the low-latency C++ Kalshi trading engine that trades its fair values (paper-only), and the signal-research harness that measures and sharpens the signal. This README covers the prediction platform (below); the overview ties in the trading and research layers.
+
 ## Project Overview
 
 This platform combines:
