@@ -1,6 +1,5 @@
 import pandas as pd
 import joblib
-import os
 import sys
 import json
 import numpy as np
@@ -17,19 +16,14 @@ ENSEMBLE_WEIGHTS_PATH = "ensemble_weights.json"
 
 def train_and_optimize_model():
     try:
-        from data_engine import build_training_dataset
+        from data_engine import load_or_build_training_dataset
     except ImportError as e:
         print(f"❌ Error importing data_engine: {e}")
         return False
 
     # 1. LOAD DATA
     try:
-        if os.path.exists("nba_training_cache.csv"):
-            print("📂 Loading data from cache...")
-            df = pd.read_csv("nba_training_cache.csv")
-        else:
-            print("📡 No cache found, fetching fresh data...")
-            df = build_training_dataset()
+        df = load_or_build_training_dataset()
 
         if df.empty:
             print("❌ Error: Dataset is empty!")

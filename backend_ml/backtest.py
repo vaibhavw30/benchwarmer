@@ -1,11 +1,10 @@
 import pandas as pd
 import joblib
-import os
 import json
 import numpy as np
 from datetime import datetime, timedelta
 from sklearn.metrics import accuracy_score, classification_report
-from data_engine import build_training_dataset
+from data_engine import load_or_build_training_dataset
 
 MODEL_PATH = "xgboost_nba_model.pkl"
 RIDGE_MODEL_PATH = "ridge_nba_model.pkl"
@@ -15,13 +14,11 @@ ENSEMBLE_WEIGHTS_PATH = "ensemble_weights.json"
 def run_backtest(days_back=7):
     print("⏳ Loading Data for Backtest...")
     
-    # 1. Load Data (Force fresh build to ensure recent games are included)
-    # If your cache is old, delete it first or this won't see yesterday's games
-    if os.path.exists("nba_training_cache.csv"):
-        df = pd.read_csv("nba_training_cache.csv")
-    else:
-        df = build_training_dataset()
-        
+    # 1. Load Data (rebuilds automatically if the cache is stale; set
+    # FORCE_REFRESH=1 to always pull fresh data regardless of age)
+    df = load_or_build_training_dataset()
+
+
     print("🧠 Loading Models...")
     xgb_model = joblib.load(MODEL_PATH)
     ridge_model = joblib.load(RIDGE_MODEL_PATH)
