@@ -1,5 +1,7 @@
 """Tests for the nightly retrain orchestrator's pure logic."""
 from datetime import date
+import json
+import os
 
 import pytest
 
@@ -93,3 +95,74 @@ def test_log_run_appends_formatted_line(tmp_path):
     assert len(lines) == 2
     assert lines[0].endswith("deployed new_acc=0.6700 current_acc=0.6600")
     assert lines[1].endswith("skipped: offseason new_acc=none current_acc=none")
+
+
+# --- main -----------------------------------------------------------------------
+
+from datetime import date as _date
+
+
+@pytest.fixture
+def fake_trainer(tmp_path, monkeypatch):
+    """Run main() in an isolated cwd with a fake trainer that writes 4 artifacts."""
+    monkeypatch.chdir(tmp_path)
+
+    state = {"called": 0, "new_accuracy": 0.70, "succeed": True}
+
+    def _train(output_dir="."):
+        state["called"] += 1
+        if not state["succeed"]:
+            return False
+        for n in sr.ARTIFACTS[:-1]:
+            with open(os.path.join(output_dir, n), "w") as f:
+                f.write("model-bytes")
+        with open(os.path.join(output_dir, "ensemble_weights.json"), "w") as f:
+            json.dump({"test_accuracy": state["new_accuracy"]}, f)
+        return True
+
+    import train_model
+    monkeypatch.setattr(train_model, "train_and_optimize_model", _train)
+    return state
+
+
+IN_SEASON = _date(2026, 1, 15)
+OFFSEASON = _date(2026, 8, 1)
+
+
+def test_main_skips_in_offseason(fake_trainer, tmp_path):
+    assert sr.main(today=OFFSEASON) == 0
+    assert fake_trainer["called"] == 0
+    assert "skipped: offseason" in (tmp_path / sr.LOG_PATH).read_text()
+
+
+def test_main_deploys_when_no_prior_model(fake_trainer, tmp_path):
+    assert sr.main(today=IN_SEASON) == 0
+    for n in sr.ARTIFACTS:
+        assert (tmp_path / n).exists()
+    assert "deployed new_acc=0.7000 current_acc=none" in (tmp_path / sr.LOG_PATH).read_text()
+
+
+def test_main_rejects_worse_model_and_keeps_live_files(fake_trainer, tmp_path):
+    (tmp_path / "ensemble_weights.json").write_text('{"test_accuracy": 0.80}')
+    (tmp_path / sr.ARTIFACTS[0]).write_text("live-model")
+    fake_trainer["new_accuracy"] = 0.70    # 10 points worse: beyond tolerance
+    assert sr.main(today=IN_SEASON) == 0
+    assert (tmp_path / sr.ARTIFACTS[0]).read_text() == "live-model"
+    assert "rejected new_acc=0.7000 current_acc=0.8000" in (tmp_path / sr.LOG_PATH).read_text()
+
+
+def test_main_logs_failure_and_exits_nonzero_when_trainer_fails(fake_trainer, tmp_path):
+    fake_trainer["succeed"] = False
+    assert sr.main(today=IN_SEASON) == 1
+    assert "failed:" in (tmp_path / sr.LOG_PATH).read_text()
+
+
+def test_main_logs_failure_on_exception(fake_trainer, tmp_path, monkeypatch):
+    import train_model
+
+    def _boom(output_dir="."):
+        raise RuntimeError("nba_api down")
+
+    monkeypatch.setattr(train_model, "train_and_optimize_model", _boom)
+    assert sr.main(today=IN_SEASON) == 1
+    assert "failed: RuntimeError('nba_api down')" in (tmp_path / sr.LOG_PATH).read_text()

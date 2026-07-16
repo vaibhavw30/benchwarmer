@@ -76,3 +76,44 @@ def log_run(outcome, new_acc=None, current_acc=None, log_path=LOG_PATH):
             f.write(line)
     except OSError:
         print(line, end="", file=sys.stderr)
+
+
+def main(today=None):
+    """Run one scheduled-retrain cycle. Returns a process exit code."""
+    from datetime import date
+    today = today or date.today()
+
+    if not in_season(today):
+        log_run("skipped: offseason")
+        return 0
+
+    import tempfile
+    temp_dir = tempfile.mkdtemp(prefix="nba_retrain_")
+    try:
+        # Lazy import: keeps module import light and lets tests patch it.
+        import train_model
+        if not train_model.train_and_optimize_model(output_dir=temp_dir):
+            log_run("failed: train_and_optimize_model returned False")
+            return 1
+
+        new_acc = read_test_accuracy(os.path.join(temp_dir, "ensemble_weights.json"))
+        if new_acc is None:
+            log_run("failed: no test_accuracy in new ensemble_weights.json")
+            return 1
+        current_acc = read_test_accuracy("ensemble_weights.json")
+
+        if should_deploy(new_acc, current_acc):
+            deploy_artifacts(temp_dir)
+            log_run("deployed", new_acc, current_acc)
+        else:
+            log_run("rejected", new_acc, current_acc)
+        return 0
+    except Exception as e:
+        log_run(f"failed: {e!r}")
+        return 1
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
