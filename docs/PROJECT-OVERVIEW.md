@@ -132,7 +132,8 @@ References: [design spec](superpowers/specs/2026-07-10-cpp-kalshi-arb-engine-des
 | Signal research harness (calibration, recalibration, forward CLV) | ✅ Built, merged · 42 Python tests |
 | `RECALIBRATE=1` wiring + reliability plot | ✅ Built · verified on real models |
 | Offline paper demo (`paper_session`, `run_paper.sh`) | ✅ Built |
-| Model-vs-close CLV (model beats the closing line) | ✅ Built, merged · 62 Python tests · edge-formula parity with the C++ engine. Accrues signal once live snapshots carry `p_model` + `settlements.json` is populated (creds/in-season). |
+| Model-vs-close CLV (model beats the closing line) | ✅ Built, merged · edge-formula parity with the C++ engine. Accrues signal once live snapshots carry `p_model` + `settlements.json` is populated (creds/in-season). |
+| Live Kalshi settlement fetch (`fetch-settlements`) | ✅ Built, merged · 75 Python tests · RSA-PSS signer ported bit-for-bit from the C++ engine. Populates `settlements.json` (`result` yes→1/no→0) so `model-clv-report` fills `beats_close`; the real REST call is deferred-verify (creds/in-season). |
 | Live market data / live paper session (M1/M3) | ⏳ Deferred — needs Kalshi creds + in-season slate |
 | Live order routing (`LiveKalshiVenue`, M5) | ⛔ Not built — hard-gated before real money |
 
