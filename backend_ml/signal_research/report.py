@@ -126,6 +126,46 @@ def _cmd_model_clv_report(args):
     print(json.dumps(out, indent=2))
 
 
+def _unique_tickers(snaps) -> list:
+    tickers = set()
+    for moments in snaps.values():
+        for row in moments.values():
+            t = row.get("ticker")
+            if t:
+                tickers.add(t)
+    return sorted(tickers)
+
+
+def _cmd_fetch_settlements(args):
+    # Live, creds+network path. Populates SETTLEMENTS_PATH from Kalshi
+    # resolutions for the tickers already captured in the snapshot store.
+    import requests
+    from backend_ml.signal_research import settlement
+    from backend_ml.signal_research.kalshi_auth import KalshiSigner
+
+    snaps = load_snapshots()
+    existing = load_settlements()
+    candidates = _unique_tickers(snaps)
+    remaining = [t for t in candidates if t not in existing]
+
+    signer = KalshiSigner.from_env()      # fail-fast if creds missing
+    session = requests.Session()
+    new = settlement.build_settlements(
+        remaining,
+        lambda t: settlement.fetch_kalshi_result(t, signer, session))
+    merged = settlement.merge_settlements(existing, new)
+
+    out = Path(SETTLEMENTS_PATH)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(merged, indent=2, sort_keys=True))
+
+    already = len(candidates) - len(remaining)
+    unresolved = len(remaining) - len(new)
+    print(f"settled {len(new)} of {len(candidates)} captured tickers "
+          f"({already} already settled, {unresolved} unresolved) "
+          f"-> {SETTLEMENTS_PATH}")
+
+
 def _cmd_capture(args):
     # Live fetchers wired here; deferred to user's live verification.
     raise SystemExit("capture requires live Kalshi/odds credentials; run manually "
@@ -155,6 +195,9 @@ def main(argv=None):
 
     pcap = sub.add_parser("capture")
     pcap.set_defaults(func=_cmd_capture)
+
+    pfs = sub.add_parser("fetch-settlements")
+    pfs.set_defaults(func=_cmd_fetch_settlements)
 
     args = parser.parse_args(argv)
     args.func(args)
