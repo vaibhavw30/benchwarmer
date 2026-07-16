@@ -82,7 +82,9 @@ cheaply, and does it beat the market after fees?*
   vs the closing line), fee-aware entry edge, in raw-sign + would-trade buckets;
   edge threshold is bit-for-bit parity with the C++ engine.
 - **`plots.py`** — reliability diagram (`evaluate --plot`).
-- **`report.py`** — CLI: `evaluate`, `capture`, `clv-report`, `model-clv-report`.
+- **`report.py`** — CLI: `evaluate`, `capture`, `clv-report`,
+  `model-clv-report`, `fetch-settlements` (queries Kalshi for captured tickers'
+  resolutions and populates `settlements.json`; needs creds).
 - **`publish_fair_values.py`** (in `backend_ml/`) — joins predictions to the Kalshi
   watchlist and, behind **`RECALIBRATE=1`**, applies the recalibration map so the
   engine trades on corrected probabilities (byte-identical when off).
