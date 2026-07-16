@@ -17,6 +17,8 @@ ARTIFACT_PATH = "backend_ml/signal_research/artifacts/recalibrator.json"
 DEFAULT_PLOT_PATH = "backend_ml/signal_research/artifacts/reliability.png"
 SNAPSHOTS_PATH = os.getenv("MARKET_SNAPSHOTS_PATH",
                            "backend_ml/signal_research/artifacts/market_snapshots.jsonl")
+SETTLEMENTS_PATH = os.getenv("SETTLEMENTS_PATH",
+                             "backend_ml/signal_research/artifacts/settlements.json")
 
 
 def run_evaluate(dataset_df, method="isotonic", artifact_path=ARTIFACT_PATH, min_n=200) -> dict:
@@ -44,6 +46,19 @@ def load_snapshots(path=SNAPSHOTS_PATH) -> dict:
         row = json.loads(line)
         out.setdefault(row["game_id"], {})[row["moment"]] = row
     return out
+
+
+def load_settlements(path=SETTLEMENTS_PATH) -> dict:
+    """Map ticker -> outcome (1 = YES/home won, 0). {} if the file is absent.
+
+    Populated live by the deferred Kalshi settlement fetch (see
+    before-live-checklist). The file format is a JSON object {ticker: 0|1}.
+    """
+    from pathlib import Path
+    p = Path(path)
+    if not p.exists():
+        return {}
+    return {k: int(v) for k, v in json.loads(p.read_text()).items()}
 
 
 def _cmd_evaluate(args):
@@ -95,6 +110,17 @@ def _cmd_clv_report(args):
     print(json.dumps(out, indent=2))
 
 
+def _cmd_model_clv_report(args):
+    from backend_ml.signal_research import model_clv
+    params = config.load_edge_params()
+    snaps = load_snapshots()
+    settlements = load_settlements()
+    out = model_clv.model_clv_report(
+        snaps, settlements, min_samples=args.min_samples,
+        signal_version=args.signal_version, **params)
+    print(json.dumps(out, indent=2))
+
+
 def _cmd_capture(args):
     # Live fetchers wired here; deferred to user's live verification.
     raise SystemExit("capture requires live Kalshi/odds credentials; run manually "
@@ -115,6 +141,12 @@ def main(argv=None):
     pc = sub.add_parser("clv-report")
     pc.add_argument("--min-samples", type=int, default=30)
     pc.set_defaults(func=_cmd_clv_report)
+
+    pmc = sub.add_parser("model-clv-report")
+    pmc.add_argument("--min-samples", type=int, default=30)
+    pmc.add_argument("--signal-version", default="unknown",
+                     choices=["raw", "recalibrated", "unknown"])
+    pmc.set_defaults(func=_cmd_model_clv_report)
 
     pcap = sub.add_parser("capture")
     pcap.set_defaults(func=_cmd_capture)
