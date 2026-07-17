@@ -222,6 +222,11 @@ def fake_trainer(tmp_path, monkeypatch):
     """Run main() in an isolated cwd with a fake trainer that writes 4 artifacts."""
     monkeypatch.chdir(tmp_path)
 
+    # main() now refreshes the cache up front; stub it so tests never scrape.
+    import data_engine
+    monkeypatch.setattr(data_engine, "load_or_build_training_dataset",
+                        lambda *a, **k: pd.DataFrame())
+
     state = {"called": 0, "new_accuracy": 0.70, "succeed": True}
 
     def _train(output_dir="."):
@@ -292,3 +297,48 @@ def test_main_logs_failure_when_mkdtemp_raises(fake_trainer, tmp_path, monkeypat
     monkeypatch.setattr(tempfile, "mkdtemp", _boom)
     assert sr.main(today=IN_SEASON) == 1
     assert "failed:" in (tmp_path / sr.LOG_PATH).read_text()
+
+
+# --- main: drift gate ---------------------------------------------------------
+
+def _write_live_weights(tmp_path, test_brier):
+    (tmp_path / "ensemble_weights.json").write_text(
+        json.dumps({"test_accuracy": 0.66, "test_brier": test_brier}))
+
+
+def test_main_skips_when_no_drift(fake_trainer, tmp_path, monkeypatch):
+    _write_live_weights(tmp_path, test_brier=0.20)
+    monkeypatch.setattr(sr, "measure_drift", lambda *a, **k: (0.20, 200))
+    assert sr.main(today=IN_SEASON) == 0
+    assert fake_trainer["called"] == 0                       # trainer NOT run
+    log = (tmp_path / sr.LOG_PATH).read_text()
+    assert "skipped: no drift" in log
+    assert "new_brier=0.2000 baseline_brier=0.2000" in log
+
+
+def test_main_retrains_when_drifted(fake_trainer, tmp_path, monkeypatch):
+    _write_live_weights(tmp_path, test_brier=0.20)
+    monkeypatch.setattr(sr, "measure_drift", lambda *a, **k: (0.30, 200))
+    assert sr.main(today=IN_SEASON) == 0
+    assert fake_trainer["called"] == 1                       # trainer ran
+
+
+def test_main_retrains_on_low_recent_data(fake_trainer, tmp_path, monkeypatch):
+    _write_live_weights(tmp_path, test_brier=0.20)
+    monkeypatch.setattr(sr, "measure_drift", lambda *a, **k: (0.10, 50))  # n < MIN_RECENT
+    assert sr.main(today=IN_SEASON) == 0
+    assert fake_trainer["called"] == 1
+
+
+def test_main_retrains_on_measure_error(fake_trainer, tmp_path, monkeypatch):
+    _write_live_weights(tmp_path, test_brier=0.20)
+    monkeypatch.setattr(sr, "measure_drift", lambda *a, **k: (None, 0))
+    assert sr.main(today=IN_SEASON) == 0
+    assert fake_trainer["called"] == 1                       # fallback -> trainer ran
+
+
+def test_main_pops_force_refresh_before_training(fake_trainer, tmp_path, monkeypatch):
+    monkeypatch.setenv("FORCE_REFRESH", "1")
+    monkeypatch.setattr(sr, "measure_drift", lambda *a, **k: (0.30, 200))  # force drift
+    sr.main(today=IN_SEASON)
+    assert "FORCE_REFRESH" not in os.environ                 # popped by main()

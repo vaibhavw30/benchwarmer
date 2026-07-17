@@ -115,12 +115,21 @@ def deploy_artifacts(temp_dir, live_dir="."):
                   os.path.join(live_dir, name))
 
 
-def log_run(outcome, new_acc=None, current_acc=None, log_path=LOG_PATH):
-    """Append one run-summary line; fall back to stderr if the log is unwritable."""
+def log_run(outcome, new_acc=None, current_acc=None,
+            new_brier=None, baseline_brier=None, log_path=LOG_PATH):
+    """Append one run-summary line; fall back to stderr if the log is unwritable.
+
+    The new_brier/baseline_brier suffix is appended only when at least one is
+    provided, so existing 'deployed'/'rejected'/'skipped: offseason' lines keep
+    their original format.
+    """
     def fmt(v):
         return "none" if v is None else f"{v:.4f}"
     line = (f"{datetime.now().isoformat(timespec='seconds')} {outcome} "
-            f"new_acc={fmt(new_acc)} current_acc={fmt(current_acc)}\n")
+            f"new_acc={fmt(new_acc)} current_acc={fmt(current_acc)}")
+    if new_brier is not None or baseline_brier is not None:
+        line += f" new_brier={fmt(new_brier)} baseline_brier={fmt(baseline_brier)}"
+    line += "\n"
     try:
         with open(log_path, "a") as f:
             f.write(line)
@@ -139,6 +148,19 @@ def main(today=None):
 
     temp_dir = None
     try:
+        # Refresh the cache once (honors FORCE_REFRESH), then pop FORCE_REFRESH
+        # so the later train step reuses this fresh cache instead of re-scraping.
+        import data_engine
+        df = data_engine.load_or_build_training_dataset()
+        os.environ.pop("FORCE_REFRESH", None)
+
+        baseline_brier = read_baseline_brier("ensemble_weights.json")
+        recent_brier, n_recent = measure_drift(df)
+        if not should_retrain(recent_brier, baseline_brier, n_recent):
+            log_run("skipped: no drift",
+                    new_brier=recent_brier, baseline_brier=baseline_brier)
+            return 0
+
         import tempfile
         temp_dir = tempfile.mkdtemp(prefix="nba_retrain_")
 
@@ -156,9 +178,11 @@ def main(today=None):
 
         if should_deploy(new_acc, current_acc):
             deploy_artifacts(temp_dir)
-            log_run("deployed", new_acc, current_acc)
+            log_run("deployed", new_acc, current_acc,
+                    new_brier=recent_brier, baseline_brier=baseline_brier)
         else:
-            log_run("rejected", new_acc, current_acc)
+            log_run("rejected", new_acc, current_acc,
+                    new_brier=recent_brier, baseline_brier=baseline_brier)
         return 0
     except Exception as e:
         log_run(f"failed: {e!r}")
