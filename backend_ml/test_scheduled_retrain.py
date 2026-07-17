@@ -140,6 +140,12 @@ def test_should_retrain_boundary_exactly_at_margin_is_no_drift():
     assert sr.should_retrain(0.22, 0.20, 200) is False
 
 
+def test_should_retrain_non_finite_recent_brier_retrains():
+    import math
+    assert sr.should_retrain(math.nan, 0.20, 200) is True
+    assert sr.should_retrain(math.inf, 0.20, 200) is True
+
+
 def test_drift_constants_have_expected_values():
     assert sr.DRIFT_WINDOW == 150
     assert sr.MIN_RECENT == 100

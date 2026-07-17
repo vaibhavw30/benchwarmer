@@ -9,6 +9,7 @@ path. One line is appended to retrain_log.txt per run.
 Spec: docs/superpowers/specs/2026-07-16-scheduled-retrain-job-design.md
 """
 import json
+import math
 import os
 import shutil
 import sys
@@ -55,7 +56,7 @@ def should_retrain(recent_brier, baseline_brier, n_recent,
     """
     if n_recent < min_recent:
         return True
-    if recent_brier is None or baseline_brier is None:
+    if recent_brier is None or not math.isfinite(recent_brier) or baseline_brier is None:
         return True
     return recent_brier > baseline_brier + margin
 
@@ -80,7 +81,8 @@ def measure_drift(df, live_dir=".", window=DRIFT_WINDOW):
         scored = dataset.build_recompute_dataset(recent, xgb, ridge, scaler, weights)
         brier = calibration.brier_score(scored["p_model"], scored["outcome"])
         return brier, len(scored)
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ measure_drift failed: {e!r}", file=sys.stderr)
         return None, 0
 
 
@@ -96,7 +98,8 @@ def read_test_accuracy(weights_path):
 def read_baseline_brier(weights_path):
     """test_brier from an ensemble_weights.json; None if absent/unreadable/non-numeric."""
     try:
-        return float(json.load(open(weights_path))["test_brier"])
+        with open(weights_path) as f:
+            return float(json.load(f)["test_brier"])
     except (OSError, KeyError, TypeError, ValueError):
         return None
 
