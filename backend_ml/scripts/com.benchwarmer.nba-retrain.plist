@@ -24,6 +24,12 @@
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/vaibhav.wudaru/benchwarmer-nba/backend_ml</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Always pull last night's games; don't retrain on a <=3-day-old cache. -->
+        <key>FORCE_REFRESH</key>
+        <string>1</string>
+    </dict>
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
