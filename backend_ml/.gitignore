@@ -18,6 +18,7 @@ models/*.joblib
 # Data files
 data/
 *.csv
+*.csv.tmp
 *.parquet
 
 # Visualizations
