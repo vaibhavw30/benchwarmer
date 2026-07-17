@@ -13,10 +13,12 @@ models/*.pkl
 models/*.joblib
 *.pkl
 *.joblib
+*.new
 
 # Data files
 data/
 *.csv
+*.csv.tmp
 *.parquet
 
 # Visualizations
@@ -47,6 +49,7 @@ htmlcov/
 # Logs
 logs/
 *.log
+retrain_log.txt
 
 # Signal-research harness artifacts (fitted maps, captured market snapshots)
 signal_research/artifacts/

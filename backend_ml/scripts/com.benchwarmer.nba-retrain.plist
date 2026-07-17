@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Nightly NBA model retrain (04:00 daily; no-ops outside the season window).
+  Spec: docs/superpowers/specs/2026-07-16-scheduled-retrain-job-design.md
+
+  Install:
+    cp backend_ml/scripts/com.benchwarmer.nba-retrain.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.benchwarmer.nba-retrain.plist
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.benchwarmer.nba-retrain.plist
+    rm ~/Library/LaunchAgents/com.benchwarmer.nba-retrain.plist
+  Check outcomes:
+    cat backend_ml/retrain_log.txt
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.benchwarmer.nba-retrain</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/vaibhav.wudaru/benchwarmer-nba/.venv/bin/python</string>
+        <string>scheduled_retrain.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/vaibhav.wudaru/benchwarmer-nba/backend_ml</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Always pull last night's games; don't retrain on a <=3-day-old cache. -->
+        <key>FORCE_REFRESH</key>
+        <string>1</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/vaibhav.wudaru/benchwarmer-nba/backend_ml/scheduled_retrain.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/vaibhav.wudaru/benchwarmer-nba/backend_ml/scheduled_retrain.stderr.log</string>
+</dict>
+</plist>
