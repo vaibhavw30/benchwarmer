@@ -140,8 +140,10 @@ def build_training_dataset():
     final_df = structure_data_for_model(step2)
     
     final_df['HOME_WIN'] = (final_df['PTS_H'] > final_df['PTS_A']).astype(int)
-    
-    final_df.to_csv("nba_training_cache.csv", index=False)
+
+    tmp_cache_path = "nba_training_cache.csv.tmp"
+    final_df.to_csv(tmp_cache_path, index=False)
+    os.rename(tmp_cache_path, "nba_training_cache.csv")
     print(f"✅ Full Dataset Ready: {len(final_df)} games.")
     return final_df
 
@@ -155,13 +157,16 @@ def load_or_build_training_dataset(cache_path="nba_training_cache.csv", max_age_
     force_refresh = os.getenv("FORCE_REFRESH") == "1"
 
     if not force_refresh and os.path.exists(cache_path):
-        df = pd.read_csv(cache_path)
-        cache_date = pd.to_datetime(df['GAME_DATE_H']).max()
-        age_days = (pd.Timestamp.now() - cache_date).days
-        if age_days <= max_age_days:
-            print(f"📂 Loading data from cache ({age_days}d old, newest game {cache_date.date()})...")
-            return df
-        print(f"🔄 Cache newest game is {age_days}d old (>{max_age_days}d threshold), rebuilding...")
+        try:
+            df = pd.read_csv(cache_path)
+            cache_date = pd.to_datetime(df['GAME_DATE_H']).max()
+            age_days = (pd.Timestamp.now() - cache_date).days
+            if age_days <= max_age_days:
+                print(f"📂 Loading data from cache ({age_days}d old, newest game {cache_date.date()})...")
+                return df
+            print(f"🔄 Cache newest game is {age_days}d old (>{max_age_days}d threshold), rebuilding...")
+        except Exception as e:
+            print(f"⚠️ Cache unreadable ({e!r}), rebuilding...")
     elif force_refresh:
         print("🔄 FORCE_REFRESH=1 set, rebuilding training dataset...")
     else:

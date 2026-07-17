@@ -13,6 +13,7 @@ models/*.pkl
 models/*.joblib
 *.pkl
 *.joblib
+*.new
 
 # Data files
 data/

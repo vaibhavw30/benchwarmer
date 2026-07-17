@@ -55,3 +55,11 @@ def test_cache_exactly_at_threshold_is_still_fresh(tmp_path, fake_build):
     _write_cache(cache, (pd.Timestamp.now() - pd.Timedelta(days=3)).strftime("%Y-%m-%d"))
     data_engine.load_or_build_training_dataset(cache_path=str(cache), max_age_days=3)
     assert fake_build["n"] == 0
+
+
+def test_corrupt_cache_triggers_rebuild(tmp_path, fake_build):
+    cache = tmp_path / "cache.csv"
+    cache.write_bytes(b"not,a,valid\ncache")
+    df = data_engine.load_or_build_training_dataset(cache_path=str(cache), max_age_days=3)
+    assert fake_build["n"] == 1
+    assert not df.empty

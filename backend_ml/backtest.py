@@ -18,7 +18,6 @@ def run_backtest(days_back=7):
     # FORCE_REFRESH=1 to always pull fresh data regardless of age)
     df = load_or_build_training_dataset()
 
-
     print("🧠 Loading Models...")
     xgb_model = joblib.load(MODEL_PATH)
     ridge_model = joblib.load(RIDGE_MODEL_PATH)

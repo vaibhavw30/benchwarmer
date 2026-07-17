@@ -166,3 +166,14 @@ def test_main_logs_failure_on_exception(fake_trainer, tmp_path, monkeypatch):
     monkeypatch.setattr(train_model, "train_and_optimize_model", _boom)
     assert sr.main(today=IN_SEASON) == 1
     assert "failed: RuntimeError('nba_api down')" in (tmp_path / sr.LOG_PATH).read_text()
+
+
+def test_main_logs_failure_when_mkdtemp_raises(fake_trainer, tmp_path, monkeypatch):
+    import tempfile
+
+    def _boom(prefix=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", _boom)
+    assert sr.main(today=IN_SEASON) == 1
+    assert "failed:" in (tmp_path / sr.LOG_PATH).read_text()

@@ -87,9 +87,11 @@ def main(today=None):
         log_run("skipped: offseason")
         return 0
 
-    import tempfile
-    temp_dir = tempfile.mkdtemp(prefix="nba_retrain_")
+    temp_dir = None
     try:
+        import tempfile
+        temp_dir = tempfile.mkdtemp(prefix="nba_retrain_")
+
         # Lazy import: keeps module import light and lets tests patch it.
         import train_model
         if not train_model.train_and_optimize_model(output_dir=temp_dir):
@@ -112,7 +114,8 @@ def main(today=None):
         log_run(f"failed: {e!r}")
         return 1
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
