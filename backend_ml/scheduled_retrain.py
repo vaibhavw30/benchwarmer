@@ -18,6 +18,10 @@ TOLERANCE = 0.01              # allow up to a 1-point held-out-accuracy dip
 SEASON_START = (10, 1)        # Oct 1
 SEASON_END = (6, 30)          # Jun 30 (window wraps the year boundary)
 
+DRIFT_WINDOW = 150            # most-recent games scored to measure current drift
+MIN_RECENT = 100             # below this many recent games -> retrain-anyway fallback
+DRIFT_MARGIN = 0.02          # recent Brier worse than baseline by more than this -> drift
+
 ARTIFACTS = [
     "xgboost_nba_model.pkl",
     "ridge_nba_model.pkl",
@@ -40,6 +44,20 @@ def should_deploy(new_acc, current_acc, tolerance=TOLERANCE):
     if current_acc is None:
         return True
     return new_acc >= current_acc - tolerance
+
+
+def should_retrain(recent_brier, baseline_brier, n_recent,
+                   min_recent=MIN_RECENT, margin=DRIFT_MARGIN):
+    """Retrain on any uncertainty; skip only on a confident no-drift signal.
+
+    True (retrain) if too little recent data, an unmeasurable recent Brier, no
+    stored baseline, or recent Brier worse than baseline by more than `margin`.
+    """
+    if n_recent < min_recent:
+        return True
+    if recent_brier is None or baseline_brier is None:
+        return True
+    return recent_brier > baseline_brier + margin
 
 
 def read_test_accuracy(weights_path):

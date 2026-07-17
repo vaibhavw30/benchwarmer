@@ -77,6 +77,32 @@ def test_read_baseline_brier_returns_none_on_problems(tmp_path, content):
     assert sr.read_baseline_brier(str(p)) is None
 
 
+# --- should_retrain -----------------------------------------------------------
+
+@pytest.mark.parametrize("recent,baseline,n,expected", [
+    (0.30, 0.20, 200, True),    # drift: recent worse than baseline+margin(0.02)
+    (0.20, 0.20, 200, False),   # no drift: equal, within margin
+    (0.215, 0.20, 200, False),  # no drift: worse but within margin (0.215 <= 0.22)
+    (0.221, 0.20, 200, True),   # drift: just beyond margin (0.221 > 0.22)
+    (0.10, 0.20, 50, True),     # low data: n_recent < MIN_RECENT overrides no-drift
+    (None, 0.20, 200, True),    # measurement error: recent is None -> retrain
+    (0.20, None, 200, True),    # no baseline yet -> retrain
+])
+def test_should_retrain(recent, baseline, n, expected):
+    assert sr.should_retrain(recent, baseline, n) is expected
+
+
+def test_should_retrain_boundary_exactly_at_margin_is_no_drift():
+    # recent == baseline + margin exactly -> not strictly greater -> skip
+    assert sr.should_retrain(0.22, 0.20, 200) is False
+
+
+def test_drift_constants_have_expected_values():
+    assert sr.DRIFT_WINDOW == 150
+    assert sr.MIN_RECENT == 100
+    assert sr.DRIFT_MARGIN == 0.02
+
+
 # --- deploy_artifacts ----------------------------------------------------------
 
 def _fill(dirpath, names, tag):
