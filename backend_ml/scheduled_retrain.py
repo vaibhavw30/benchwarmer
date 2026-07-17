@@ -60,6 +60,30 @@ def should_retrain(recent_brier, baseline_brier, n_recent,
     return recent_brier > baseline_brier + margin
 
 
+def measure_drift(df, live_dir=".", window=DRIFT_WINDOW):
+    """Recent-window Brier of the deployed model; (None, 0) on any error.
+
+    Loads the deployed artifacts from live_dir, scores the most-recent
+    `window` games in df with the leakage-safe recompute path, and returns
+    (recent_brier, n_recent). Any load/score failure yields (None, 0) so the
+    caller falls back to retraining rather than silently skipping.
+    """
+    try:
+        import joblib
+        from signal_research import dataset, calibration
+        xgb = joblib.load(os.path.join(live_dir, "xgboost_nba_model.pkl"))
+        ridge = joblib.load(os.path.join(live_dir, "ridge_nba_model.pkl"))
+        scaler = joblib.load(os.path.join(live_dir, "feature_scaler.pkl"))
+        with open(os.path.join(live_dir, "ensemble_weights.json")) as f:
+            weights = json.load(f)
+        recent = df.sort_values("GAME_DATE_H").tail(window)
+        scored = dataset.build_recompute_dataset(recent, xgb, ridge, scaler, weights)
+        brier = calibration.brier_score(scored["p_model"], scored["outcome"])
+        return brier, len(scored)
+    except Exception:
+        return None, 0
+
+
 def read_test_accuracy(weights_path):
     """test_accuracy from an ensemble_weights.json; None if absent/unreadable."""
     try:

@@ -7,6 +7,49 @@ import pytest
 
 import scheduled_retrain as sr
 
+import joblib
+import numpy as np
+import pandas as pd
+from signal_research import dataset as _ds
+
+
+class _FakeXGB:
+    """predict_proba -> P(home win) = 0.7 for every row."""
+    def predict_proba(self, X):
+        n = len(X)
+        return np.column_stack([np.full(n, 0.3), np.full(n, 0.7)])
+
+
+class _FakeRidge:
+    def decision_function(self, X):
+        return np.zeros(len(X))            # sigmoid(0) = 0.5
+
+
+class _FakeScaler:
+    def transform(self, X):
+        return np.asarray(X, dtype=float)
+
+
+def _drift_games(n, all_home_wins=True):
+    """A minimal recompute-ready frame: FEATURES + id/date/outcome columns."""
+    row = {f: 1.0 for f in _ds.FEATURES}
+    df = pd.DataFrame([row] * n)
+    df["GAME_ID"] = [f"g{i}" for i in range(n)]
+    df["GAME_DATE_H"] = pd.to_datetime("2026-01-01") + pd.to_timedelta(range(n), unit="D")
+    df["TEAM_ID_H"] = 100
+    df["TEAM_ID_A"] = 200
+    df["HOME_WIN"] = 1 if all_home_wins else 0
+    return df
+
+
+def _write_live_artifacts(live_dir, xgb_w=0.5, ridge_w=0.5):
+    joblib.dump(_FakeXGB(), str(live_dir / "xgboost_nba_model.pkl"))
+    joblib.dump(_FakeRidge(), str(live_dir / "ridge_nba_model.pkl"))
+    joblib.dump(_FakeScaler(), str(live_dir / "feature_scaler.pkl"))
+    (live_dir / "ensemble_weights.json").write_text(
+        json.dumps({"xgb_weight": xgb_w, "ridge_weight": ridge_w,
+                    "test_accuracy": 0.66, "test_brier": 0.2}))
+
 
 # --- in_season -------------------------------------------------------------
 
@@ -101,6 +144,31 @@ def test_drift_constants_have_expected_values():
     assert sr.DRIFT_WINDOW == 150
     assert sr.MIN_RECENT == 100
     assert sr.DRIFT_MARGIN == 0.02
+
+
+# --- measure_drift --------------------------------------------------------------
+
+def test_measure_drift_returns_brier_and_count(tmp_path):
+    _write_live_artifacts(tmp_path)
+    df = _drift_games(200, all_home_wins=True)
+    brier, n = sr.measure_drift(df, live_dir=str(tmp_path), window=150)
+    # p = 0.5*0.7 + 0.5*0.5 = 0.6; outcome = 1 -> brier = (0.6-1)^2 = 0.16
+    assert n == 150
+    assert brier == pytest.approx(0.16, abs=1e-9)
+
+
+def test_measure_drift_window_larger_than_rows_uses_all(tmp_path):
+    _write_live_artifacts(tmp_path)
+    df = _drift_games(5)
+    brier, n = sr.measure_drift(df, live_dir=str(tmp_path), window=150)
+    assert n == 5
+    assert brier == pytest.approx(0.16, abs=1e-9)
+
+
+def test_measure_drift_missing_artifacts_returns_none(tmp_path):
+    # empty live_dir -> joblib.load raises -> caught -> (None, 0)
+    df = _drift_games(10)
+    assert sr.measure_drift(df, live_dir=str(tmp_path), window=150) == (None, 0)
 
 
 # --- deploy_artifacts ----------------------------------------------------------
