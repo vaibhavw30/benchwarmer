@@ -6,7 +6,7 @@ import json
 import numpy as np
 from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV, TimeSeriesSplit
-from sklearn.metrics import accuracy_score, classification_report, log_loss, roc_auc_score
+from sklearn.metrics import accuracy_score, classification_report, log_loss, roc_auc_score, brier_score_loss
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import RidgeClassifierCV
 
@@ -22,6 +22,20 @@ def save_artifacts(xgb_model, ridge_model, scaler, weights_config, output_dir=".
     joblib.dump(scaler, os.path.join(output_dir, SCALER_PATH))
     with open(os.path.join(output_dir, ENSEMBLE_WEIGHTS_PATH), 'w') as f:
         json.dump(weights_config, f, indent=2)
+
+def build_weights_config(xgb_weight, ridge_weight, test_accuracy, test_brier, train_date=None):
+    """Assemble the ensemble_weights.json payload.
+
+    test_brier is the held-out ensemble Brier score; it is the baseline the
+    nightly drift gate compares against (see scheduled_retrain.measure_drift).
+    """
+    return {
+        "xgb_weight": xgb_weight,
+        "ridge_weight": ridge_weight,
+        "test_accuracy": float(test_accuracy),
+        "test_brier": float(test_brier),
+        "train_date": str(train_date if train_date is not None else pd.Timestamp.now()),
+    }
 
 def train_and_optimize_model(output_dir="."):
     try:
@@ -188,6 +202,7 @@ def train_and_optimize_model(output_dir="."):
 
     ensemble_auc = roc_auc_score(y_test, ensemble_probs_best)
     ensemble_logloss = log_loss(y_test, ensemble_probs_2d)
+    ensemble_brier = brier_score_loss(y_test, ensemble_probs_best)
 
     print(f"\n✨ BEST ENSEMBLE (XGB:{xgb_w:.1f}, Ridge:{ridge_w:.1f}):")
     print(f"   Accuracy: {best_ensemble_acc:.2%}")
@@ -241,12 +256,7 @@ def train_and_optimize_model(output_dir="."):
         print(f"   {row['Feature']:25} XGB:{row['XGB_Importance']:.4f}  Ridge:{row['Ridge_Coef']:.4f}")
 
     # 6. SAVE ALL MODELS
-    weights_config = {
-        "xgb_weight": xgb_w,
-        "ridge_weight": ridge_w,
-        "test_accuracy": float(best_ensemble_acc),
-        "train_date": str(pd.Timestamp.now())
-    }
+    weights_config = build_weights_config(xgb_w, ridge_w, best_ensemble_acc, ensemble_brier)
     save_artifacts(best_model, ridge, scaler, weights_config, output_dir)
 
     print(f"\n💾 Models Saved:")
