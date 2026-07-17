@@ -4,6 +4,7 @@ import os
 import sys
 import json
 import numpy as np
+from dataclasses import dataclass
 from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV, TimeSeriesSplit
 from sklearn.metrics import accuracy_score, classification_report, log_loss, roc_auc_score, brier_score_loss
@@ -14,6 +15,57 @@ MODEL_PATH = "xgboost_nba_model.pkl"
 RIDGE_MODEL_PATH = "ridge_nba_model.pkl"
 SCALER_PATH = "feature_scaler.pkl"
 ENSEMBLE_WEIGHTS_PATH = "ensemble_weights.json"
+
+
+@dataclass
+class FitResult:
+    """Fitted base models + scaler produced by fit_ensemble."""
+    xgb_model: object
+    ridge_model: object
+    scaler: object
+
+
+def fit_ensemble(X_train, y_train, *, sample_weight=None, params=None):
+    """Fit XGBoost + scaled Ridge on X_train/y_train; return a FitResult.
+
+    - sample_weight threads into GridSearchCV.fit / XGBClassifier.fit and
+      RidgeClassifierCV.fit. It is applied to the per-fold estimator fit but
+      not the CV scorer (model-selection scoring stays unweighted accuracy).
+    - params is None  -> production path: GridSearchCV over the param grid.
+    - params is a dict -> sweep path: XGBClassifier(**params) fit directly
+      (no grid search), so every half-life is compared on identical params.
+
+    The scaler is StandardScaler fit on X_train only. Ridge is
+    RidgeClassifierCV (self-tuning alpha) in both paths.
+    """
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    tscv = TimeSeriesSplit(n_splits=3)
+
+    if params is None:
+        param_grid = {
+            'n_estimators': [150, 250],
+            'learning_rate': [0.03, 0.05],
+            'max_depth': [3, 4],
+            'scale_pos_weight': [0.85, 0.9],
+            'subsample': [0.8],
+            'colsample_bytree': [0.8],
+        }
+        xgb = XGBClassifier(eval_metric='logloss', random_state=42)
+        grid_search = GridSearchCV(xgb, param_grid, cv=tscv, scoring='accuracy',
+                                   verbose=1, n_jobs=-1)
+        grid_search.fit(X_train, y_train, sample_weight=sample_weight)
+        xgb_model = grid_search.best_estimator_
+    else:
+        xgb_model = XGBClassifier(eval_metric='logloss', random_state=42, **params)
+        xgb_model.fit(X_train, y_train, sample_weight=sample_weight)
+
+    alphas = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+    ridge = RidgeClassifierCV(alphas=alphas, cv=tscv, scoring='accuracy')
+    ridge.fit(X_train_scaled, y_train, sample_weight=sample_weight)
+
+    return FitResult(xgb_model=xgb_model, ridge_model=ridge, scaler=scaler)
+
 
 def save_artifacts(xgb_model, ridge_model, scaler, weights_config, output_dir="."):
     """Write the 4 model artifacts to output_dir (default: cwd, as always)."""
@@ -96,44 +148,13 @@ def train_and_optimize_model(output_dir="."):
 
     print(f"\n📊 Training on {len(X_train)} games...")
 
-    # 3B. SCALE FEATURES FOR RIDGE
-    # XGBoost doesn't need scaling, but Ridge does
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-
-    print("📏 Scaled features for Ridge (mean=0, std=1)")
-
-    # 4. TRAIN
-    param_grid = {
-        'n_estimators': [150, 250],
-        'learning_rate': [0.03, 0.05],
-        'max_depth': [3, 4],
-        'scale_pos_weight': [0.85, 0.9],
-        'subsample': [0.8],
-        'colsample_bytree': [0.8]
-    }
-
-    xgb = XGBClassifier(eval_metric='logloss', random_state=42)
-    tscv = TimeSeriesSplit(n_splits=3)
-
+    # 3B/4. FIT ENSEMBLE (scaler + XGBoost grid search + Ridge) via shared core.
     print("🔎 Grid Search Tuning...")
-    grid_search = GridSearchCV(xgb, param_grid, cv=tscv, scoring='accuracy', verbose=1, n_jobs=-1)
-    grid_search.fit(X_train, y_train)
-
-    print(f"🌟 Best Params: {grid_search.best_params_}")
-
-    # 4B. TRAIN RIDGE REGRESSION
-    print("\n🔎 Training Ridge Regression with Cross-Validation...")
-
-    # RidgeClassifierCV automatically tunes alpha via CV
-    alphas = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
-    ridge = RidgeClassifierCV(
-        alphas=alphas,
-        cv=tscv,  # Use same TimeSeriesSplit as XGBoost
-        scoring='accuracy'
-    )
-    ridge.fit(X_train_scaled, y_train)
+    fit = fit_ensemble(X_train, y_train, sample_weight=None)
+    best_model = fit.xgb_model
+    ridge = fit.ridge_model
+    scaler = fit.scaler
+    X_test_scaled = scaler.transform(X_test)
 
     print(f"🌟 Best Ridge Alpha: {ridge.alpha_}")
 
@@ -141,8 +162,6 @@ def train_and_optimize_model(output_dir="."):
     print("\n" + "="*80)
     print("📊 MODEL EVALUATION")
     print("="*80)
-
-    best_model = grid_search.best_estimator_
 
     # XGBoost Evaluation
     xgb_preds = best_model.predict(X_test)
