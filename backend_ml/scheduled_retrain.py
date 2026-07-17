@@ -51,6 +51,14 @@ def read_test_accuracy(weights_path):
         return None
 
 
+def read_baseline_brier(weights_path):
+    """test_brier from an ensemble_weights.json; None if absent/unreadable/non-numeric."""
+    try:
+        return float(json.load(open(weights_path))["test_brier"])
+    except (OSError, KeyError, TypeError, ValueError):
+        return None
+
+
 def deploy_artifacts(temp_dir, live_dir="."):
     """Copy-then-rename each artifact so no live file is ever half-written.
 

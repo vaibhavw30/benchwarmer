@@ -56,6 +56,27 @@ def test_read_test_accuracy_returns_none_on_problems(tmp_path, content):
     assert sr.read_test_accuracy(str(p)) is None
 
 
+# --- read_baseline_brier ------------------------------------------------------
+
+def test_read_baseline_brier_happy_path(tmp_path):
+    p = tmp_path / "w.json"
+    p.write_text('{"test_accuracy": 0.66, "test_brier": 0.21}')
+    assert sr.read_baseline_brier(str(p)) == 0.21
+
+
+@pytest.mark.parametrize("content", [
+    None,                                          # file absent
+    "not json",                                    # unparseable
+    '{"test_accuracy": 0.66}',                     # key missing (legacy model)
+    '{"test_accuracy": 0.66, "test_brier": null}', # non-numeric
+])
+def test_read_baseline_brier_returns_none_on_problems(tmp_path, content):
+    p = tmp_path / "w.json"
+    if content is not None:
+        p.write_text(content)
+    assert sr.read_baseline_brier(str(p)) is None
+
+
 # --- deploy_artifacts ----------------------------------------------------------
 
 def _fill(dirpath, names, tag):
