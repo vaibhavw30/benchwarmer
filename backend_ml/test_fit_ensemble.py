@@ -125,3 +125,20 @@ def test_unweighted_equivalence_smoke():
     assert np.allclose(ref_ridge.decision_function(ref_scaler.transform(X)),
                        res.ridge_model.decision_function(res.scaler.transform(X)),
                        atol=1e-6)
+
+
+def test_gridsearch_path_threads_sample_weight():
+    """The params=None (GridSearchCV) production path must thread a real
+    sample_weight into the per-fold/refit estimator fit without raising on
+    sklearn 1.7 metadata routing. CV scoring is unweighted and deterministic
+    (random_state=42), so both runs pick identical params and the fits differ
+    ONLY because of the weighting on best_estimator_'s refit."""
+    df = _synth_frame(n=200, seed=2)
+    X, y = _Xy(df)
+    uniform = fit_ensemble(X, y, sample_weight=None, params=None)
+    w = np.ones(len(X))
+    w[-len(X) // 4:] = 50.0
+    weighted = fit_ensemble(X, y, sample_weight=w, params=None)
+    p_uniform = uniform.xgb_model.predict_proba(X)[:, 1]
+    p_weighted = weighted.xgb_model.predict_proba(X)[:, 1]
+    assert np.max(np.abs(p_uniform - p_weighted)) > 1e-3
