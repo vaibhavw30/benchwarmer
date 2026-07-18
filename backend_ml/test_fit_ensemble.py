@@ -142,3 +142,50 @@ def test_gridsearch_path_threads_sample_weight():
     p_uniform = uniform.xgb_model.predict_proba(X)[:, 1]
     p_weighted = weighted.xgb_model.predict_proba(X)[:, 1]
     assert np.max(np.abs(p_uniform - p_weighted)) > 1e-3
+
+
+def test_train_model_exposes_halflife_constant_defaulting_none():
+    import train_model
+    assert hasattr(train_model, "TRAIN_HALFLIFE_GAMES")
+    assert train_model.TRAIN_HALFLIFE_GAMES is None   # uniform until the sweep sets H*
+
+
+def test_train_and_optimize_uses_recency_weights_on_train_split(monkeypatch):
+    """train_and_optimize_model must weight the TRAIN split via recency_weights
+    (len == train split size) and pass those weights into fit_ensemble; the test
+    split stays unweighted."""
+    import numpy as np
+    import pandas as pd
+    import train_model
+    from signal_research.dataset import FEATURES
+
+    n = 200
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({f: rng.normal(size=n) for f in FEATURES})
+    df["HOME_WIN"] = (df["ELO_H"].values > 0).astype(int)
+    df["GAME_DATE_H"] = pd.date_range("2015-10-01", periods=n, freq="D")
+
+    monkeypatch.setattr(train_model, "TRAIN_HALFLIFE_GAMES", 50.0)
+    # Stub data load to our synthetic frame.
+    import data_engine
+    monkeypatch.setattr(data_engine, "load_or_build_training_dataset", lambda: df)
+
+    captured = {}
+    real_fit = train_model.fit_ensemble
+
+    def spy_fit(X_train, y_train, *, sample_weight=None, params=None):
+        captured["sample_weight"] = sample_weight
+        captured["n_train"] = len(X_train)
+        return real_fit(X_train, y_train, sample_weight=sample_weight, params=params)
+
+    monkeypatch.setattr(train_model, "fit_ensemble", spy_fit)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        assert train_model.train_and_optimize_model(output_dir=tmp) is True
+
+    w = captured["sample_weight"]
+    assert w is not None
+    assert len(w) == captured["n_train"]              # weights sized to TRAIN split
+    assert w[-1] == pytest.approx(1.0)                # newest train row weight 1.0
+    assert np.all(np.diff(w) > 0)                      # recency decay applied

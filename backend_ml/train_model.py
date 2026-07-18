@@ -11,10 +11,17 @@ from sklearn.metrics import accuracy_score, classification_report, log_loss, roc
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import RidgeClassifierCV
 
+from recency import recency_weights
+
 MODEL_PATH = "xgboost_nba_model.pkl"
 RIDGE_MODEL_PATH = "ridge_nba_model.pkl"
 SCALER_PATH = "feature_scaler.pkl"
 ENSEMBLE_WEIGHTS_PATH = "ensemble_weights.json"
+
+# Half-life (league-games) for recency weighting of the training split.
+# Chosen by halflife_sweep.py (docs/superpowers/specs/2026-07-17-rolling-window-training-design.md).
+# None => uniform weighting (no recency), byte-identical to pre-#5 behavior.
+TRAIN_HALFLIFE_GAMES: float | None = None   # set to H* after the sweep runs
 
 
 @dataclass
@@ -150,7 +157,8 @@ def train_and_optimize_model(output_dir="."):
 
     # 3B/4. FIT ENSEMBLE (scaler + XGBoost grid search + Ridge) via shared core.
     print("🔎 Grid Search Tuning...")
-    fit = fit_ensemble(X_train, y_train, sample_weight=None)
+    train_weights = recency_weights(len(X_train), TRAIN_HALFLIFE_GAMES)
+    fit = fit_ensemble(X_train, y_train, sample_weight=train_weights)
     best_model = fit.xgb_model
     ridge = fit.ridge_model
     scaler = fit.scaler
