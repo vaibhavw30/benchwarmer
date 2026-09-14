@@ -3,7 +3,9 @@
 A C++20 market-data ingest and paper-trading engine for [Kalshi](https://kalshi.com)
 binary event markets, with a deterministic offline replay harness.
 
-It maintains per-instrument order books from a live authenticated WebSocket feed,
+It maintains per-instrument order books from an authenticated WebSocket feed
+(the client builds, but has never been run against a real account — see
+[Known limitations](#known-limitations)),
 prices them against fair values published by the NBA model, and routes the
 resulting decisions through a risk gate into a simulated (paper) execution venue.
 Every decision is emitted as one JSON line of telemetry.
@@ -45,13 +47,14 @@ Kalshi WSS ──TLS──▶ MarketDataGateway::run()      gateway_run.cpp:84
                      Telemetry::event             telemetry.hpp:10   (JSON lines)
 
                    └───────────────── replay path ────────────────┘
-recorded .jsonl ──▶ handle_raw(line)  ── identical components from here down
+fixture .jsonl  ──▶ handle_raw(line)  ── identical components from here down
                     (test_replay.cpp:60, tools/paper_session.cpp:62)
 ```
 
 The replay path re-enters the pipeline at exactly the same function the live
-socket calls (`handle_raw`), so recorded frames exercise the real gateway, book,
-strategy, risk and venue code — not a parallel test double.
+socket calls (`handle_raw`), so fixture frames exercise the real gateway, book,
+strategy, risk and venue code — not a parallel test double. The only fixture
+today is hand-written, not captured from Kalshi.
 
 ---
 
@@ -126,6 +129,16 @@ so a malformed frame that makes simdjson throw propagates out of it — in the
 live path that exception is caught by the reconnect handler below; in the
 replay path it would terminate the run.
 
+**What this does *not* cover.** Parse-then-commit only protects against frames
+that fail to parse. There is **no validation** of well-formed frames and **no
+sequence tracking** — `seq` is never read. Probing the built library shows all
+of the following are applied without error: a delta before any snapshot
+(creates a book from nothing), a `seq` jump from 1 to 7, a delta that drives a
+level below zero (level silently erased), `side: "banana"` (treated as NO), and
+`price: 500`. A snapshot truncated mid-array is **silently dropped** rather than
+reported. And because a parse exception reaches the reconnect handler, one bad
+frame tears down a healthy connection.
+
 **2. Fair-value swap is atomic, and malformed input is not clobbering.**
 `FairValueProvider::load_from_file` (`src/fair_value/fair_value.cpp:14`) parses
 into a **fresh** map, and on any exception returns early, explicitly
@@ -167,8 +180,10 @@ switch trips either from a file flag polled every tick
 
 ## Deterministic replay harness
 
-Recorded WebSocket frames are re-run through the identical ingest path, and the
-resulting telemetry must be **byte-identical** across runs.
+Hand-written WebSocket frames are run through the identical ingest path twice in
+one process, and the resulting telemetry must be **byte-identical** across the
+two runs. This proves the pipeline is deterministic; it compares strategy
+telemetry, not book state, and there is one replay test, not one per session.
 
 `tests/test_replay.cpp` reads `tests/fixtures/replay_sample.jsonl`
 (`test_replay.cpp:52`), feeds each line to the real
@@ -342,7 +357,10 @@ Touch a file named `KILL` in the working directory to halt trading live
 ## Known limitations
 
 - Live WebSocket path is **not verified against a real account** (`gateway_run.cpp:3-8`).
-- **No market-data recorder**; the sole replay fixture is hand-authored, 9 frames, one ticker.
+- **No market-data recorder or journal**; the sole replay fixture is hand-authored, 9 frames, one ticker.
+- **No sequence/gap checking and no frame validation** — out-of-order, pre-snapshot, out-of-range and malformed-side deltas are all applied (see Failure-closed §1).
+- A malformed frame is handled as a connection failure and triggers a reconnect.
+- No serialized book-state output; replay compares strategy telemetry only.
 - Aggregate-exposure and order-rate limits are configured but unenforced (`risk_manager.hpp:9-13`).
 - Arb executes the YES leg only — directional, not a riskless lock (`strategy_engine.cpp:31-34`).
 - Market-making quotes are logged, never executed (`strategy_engine.cpp:69`).

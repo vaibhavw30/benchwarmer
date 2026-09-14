@@ -66,8 +66,8 @@ See **[`trading_engine/README.md`](trading_engine/README.md)** for full detail.
 Maintains per-instrument order books from an authenticated, TLS-verified Kalshi
 WebSocket feed, prices them against the model's published fair values, and
 routes decisions through a risk gate into a simulated venue. Includes a
-deterministic replay harness: recorded frames are re-run through the identical
-ingest path and must produce byte-identical telemetry.
+deterministic replay harness: a hand-written frame fixture is run twice through
+the identical ingest path and must produce byte-identical telemetry.
 
 - **33 tests across 17 suites, all passing.**
 - Failure-closed: refuses to trade on stale fair values, crossed books, or a
@@ -77,7 +77,8 @@ ingest path and must produce byte-identical telemetry.
 
 Known limits, stated plainly: the live WebSocket path has never been run against
 a real Kalshi account; there is **no market-data recorder** (the replay fixture
-is hand-authored); aggregate-exposure and order-rate limits are configured but
+is hand-authored); there is no sequence/gap checking or validation of incoming
+frames; aggregate-exposure and order-rate limits are configured but
 unenforced; fees gate signals but aren't deducted from P&L; and there is no
 slippage or latency modelling.
 
@@ -247,7 +248,8 @@ cd trading_engine
 - [x] Deterministic replay harness (33 tests passing)
 - [ ] Live path verified against a real Kalshi account
 - [ ] Aggregate-exposure and order-rate limits enforced
-- [ ] Market-data recorder (replay fixture is currently hand-authored)
+- [ ] Sequence/gap checking and frame validation
+- [ ] Market-data recorder and journal (replay fixture is currently hand-authored)
 - [ ] Two-legged arb execution (currently YES leg only)
 
 ### Phase 6: Signal research — ✅ core complete
